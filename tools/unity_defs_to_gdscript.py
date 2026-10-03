@@ -320,7 +320,8 @@ def main(argv=None):
             if not all(isinstance(r.get(k), (int, float, bool))
                        for r in rows for k in keys):
                 lines.append("\n# %s (%d entries) -- SKIPPED: contains nested"
-                             " structs, see work/assets/definitions_raw.json"
+                             " structs; the full value is in the recovered"
+                             " definitions.json (see the regenerate command above)"
                              % (key, len(rows)))
                 continue
             lines.append("\n# %s (%d entries)" % (key, len(rows)))
@@ -347,7 +348,8 @@ def main(argv=None):
         print("  tables       : %s" % ", ".join("%s[%d]" % (k, len(v)) for k, v in tables))
     total_keys = sum(len(v.get("m_Curve") or []) for _, v in curves)
     print("  curve keys   : %d" % total_keys)
-    print("  json kept at : work/assets/definitions_raw.json")
+    print("  full recovery: work/assets/definitions/definitions.json")
+    print("                  (tools/dump_definitions.py; this tool reads a bundle)")
     return 0
 
 
