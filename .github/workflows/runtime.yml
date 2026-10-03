@@ -1,0 +1,85 @@
+name: runtime-evidence
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-evidence-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: 4.7.2-stable
+
+jobs:
+  runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - name: Test the fail-closed command runner
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+
+      - name: Install the pinned engine and preserve reproducible inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p verification tooling
+          archive="Godot_v${GODOT_VERSION}_linux.x86_64.zip"
+          curl --fail --location --retry 3 -o "verification/$archive" \
+            "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/$archive"
+          curl --fail --location --retry 3 -o verification/LICENSE-Godot.txt \
+            "https://raw.githubusercontent.com/godotengine/godot/${GODOT_VERSION}/LICENSE.txt"
+          unzip -q "verification/$archive" -d tooling
+          chmod +x "tooling/Godot_v${GODOT_VERSION}_linux.x86_64"
+          ln -s "Godot_v${GODOT_VERSION}_linux.x86_64" tooling/godot
+          echo "$PWD/tooling" >> "$GITHUB_PATH"
+          git rev-parse HEAD > verification/source-commit.txt
+          # No DMG, signing credentials, extracted media, caches or Git credentials.
+          # This is an exact source snapshot for reproducing a failed CI run offline.
+          git archive --format=tar.gz -o verification/source.tar.gz HEAD \
+            README.md docs port scripts tests tools work/assets .gitattributes .gitignore .github
+          (cd verification && sha256sum "$archive" source.tar.gz > SHA256SUMS.txt)
+
+      - name: Import with error-log checking
+        run: >-
+          python3 scripts/checked_process.py --timeout 240
+          --log verification/import.log --
+          godot --headless --path port --import
+
+      - name: Boot with error-log checking
+        run: >-
+          python3 scripts/checked_process.py --timeout 120
+          --log verification/boot.log --
+          godot --headless --path port --quit-after 300
+
+      - name: Execute every Godot regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          for test in port/tests/test_*.gd; do
+            name="$(basename "$test" .gd)"
+            python3 scripts/checked_process.py --timeout 180 --require 'PASS:' \
+              --log "verification/$name.log" -- \
+              godot --headless --path port --script "res://tests/$name.gd"
+          done
+
+      - name: Preserve logs and exact reproduction inputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-evidence-${{ github.sha }}
+          path: verification/
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
