@@ -19,8 +19,12 @@ Target is **Warped Kart Racers v2.02** (`games/`), a Unity 2021.3 IL2CPP build.
 | Kart handling model recovered (93 tuning fields, exact offsets) | done |
 | Real tuning values extracted from the game's ScriptableObjects | done — 78 scalars + 5 curves |
 | Core kart physics decompiled in Ghidra with real C# names | done (22 methods) |
-| Godot 4 port + signed Android APK | done — `port/`, 55 MB, arm64-v8a + x86_64 |
-| Art/audio assets, touch controls, other 5 handling profiles | **not done** |
+| Godot 4 port + signed Android APK | done — `port/`, 58 MB, arm64-v8a + x86_64 |
+| All 814 ScriptableObjects extracted into a validated GDScript database | done |
+| All 16 map scenes decoded; 12 race tracks build into drivable geometry | done |
+| All 6 handling profiles wired, incl. per-surface grip modifiers | done |
+| Race loop: laps, checkpoints, positions, pickups, AI, HUD, touch controls | done |
+| Art and audio assets | **not done** |
 
 ### What "recovered source" means here
 
@@ -40,15 +44,25 @@ So this is a complete specification rather than compilable source. That is the
 right artifact for a port: rewrite bodies in GDScript from the signature, the
 recovered data values, and targeted decompilation of the algorithms you need.
 
-**Structure and the primary tuning values are both recovered.** The remaining
+**Structure, tuning values, and content are all recovered.** The remaining
 port-side numbers (`steer_speed`, `gliding_speed`, `top_speed`,
 `top_acceleration`) are marked `# PORT-SIDE`: the original either folds them
 into native code or never serializes them.
 
+The game's content came out with it. `tools/dump_definitions.py` recovers all
+**814 ScriptableObjects** across 55 classes — 25 karts, 48 characters, 26 maps,
+7 boosts, 21 weighted pickup tables, 31 AI profiles, the league and campaign
+trees — and `tools/extract_assets.py` + `tools/build_tracks.py` decode all 16
+map scenes into each track's racing line, per-point road widths, pickup spots,
+respawn locations and surface tags. That is a playable race, not a test scene.
+
 ```bash
-# prove the recovered values survived the trip into Godot
-cd port && godot --headless --path . --script res://tests/test_recovered_tuning.gd
-# PASS: 34 checks
+# prove the recovered data survived the trip into Godot
+cd port
+for t in test_recovered_tuning test_game_db test_all_tracks test_race_integration; do
+  godot --headless --path . --script "res://tests/$t.gd"
+done
+# 40 + 73 + 52 + 19 checks, all passing
 ```
 
 Full write-up, including every recovered name and offset and an honest
@@ -124,6 +138,11 @@ tools/ghidra-scripts/
 tools/macho_slice.py             carve one arch out of a universal (fat) Mach-O
 tools/il2cpp_triage.py           query dump.cs: summary/ns/asm/type/find
 tools/unity_defs_to_gdscript.py  recover ScriptableObject values from a bundle
+tools/dump_definitions.py        dump every ScriptableObject to JSON, refs resolved
+tools/game_defs_to_gdscript.py   compile those definitions into GDScript data
+tools/extract_assets.py          scenes, meshes and textures out of AssetBundles
+tools/build_tracks.py            resolve map scenes into track definitions
+tools/tracks_to_gdscript.py      compile track definitions into GDScript
 tools/il2cpp_to_csharp.sh       rebuild the C# source tree from the stub DLLs
 port/                            Godot 4 project + Android export preset
 ```

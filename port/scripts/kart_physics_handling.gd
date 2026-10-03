@@ -83,6 +83,13 @@ const D := preload("res://scripts/kart_physics_handling_data.gd")
 
 @export_group("Drift boost levels")
 @export var drift_boost_levels: Array[DriftBoostLevel] = []
+
+## Per-surface grip modifiers, recovered from `KartHandlingSurfaceTypes`
+## (7 entries: road, off-track, boost pads, ice...). Each entry carries the
+## multipliers that make a surface feel different -- surface 2 runs at half
+## speed and 20% extra braking. Loaded by HandlingProfile from the recovered
+## ScriptableObjects; see scripts/handling_profile.gd.
+@export var surface_types: Array = []
 @export var drift_in_boost_accumulation_factor: float = D.DRIFT_IN_BOOST_ACCUMULATION_FACTOR  # +0xD8
 @export var drift_out_boost_accumulation_factor: float = D.DRIFT_OUT_BOOST_ACCUMULATION_FACTOR  # +0xDC
 

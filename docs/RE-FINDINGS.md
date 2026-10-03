@@ -7,10 +7,11 @@ TestFlight build, bundle id `com.electricsquare.atlas-testflight`.
 Android APK.
 
 **Status:** the game's *entire managed API surface* is recovered and
-cross-validated, and the kart handling model has been **ported to Godot 4 and
-exported as a signed Android APK** (`port/`, see [§5](#5-the-godot-port-apk-and-what-remains)).
-Method bodies for core kart physics are decompiled. Asset and audio extraction,
-real tuning values, and touch controls are **not** done — see
+cross-validated; **all 814 shipped ScriptableObjects** are extracted; **all 16
+map scenes** are decoded into usable track data; and the port is a **playable
+race** exported as a signed Android APK (`port/`, see
+[§5](#5-the-godot-port-apk-and-what-remains)). Method bodies for core kart
+physics are decompiled. Art and audio extraction are **not** done — see
 [Limitations](#limitations).
 
 ---
@@ -366,17 +367,48 @@ folds them into native code or sets them at runtime and never serializes them.
 Curve tangent *weights* are dropped, losslessly: every keyframe uses Unity's
 neutral 1/3, and Godot 4's `Curve` has no per-point weight setter.
 
-### 5.3 Remaining work
+### 5.3 What the game data layer now contains
 
-1. **Art + audio assets** — unpack the other 443 AssetBundles (UnityPy or
-   AssetRipper). The 18 recovered `map_race*` bundles replace the procedural
-   test track.
-2. **Wire the other five handling profiles** to Battle / Race150 / Shooter
-   modes — the data is already extractable.
-3. **Touch controls** — required for a real Android release; currently
-   keyboard/gamepad only.
-4. **FMOD banks** → Ogg/WAV for Godot.
-5. **Bulk Ghidra decompilation** of the remaining ~13,570 game methods.
+Three new tools turn the recovered assets into something the engine runs:
+
+| Tool | Output |
+|---|---|
+| `tools/dump_definitions.py` | all 814 ScriptableObjects across 55 classes, as JSON, with cross-references resolved |
+| `tools/game_defs_to_gdscript.py` | the same as compile-time GDScript constants, split by domain |
+| `tools/extract_assets.py` | scene graphs, meshes, textures from every AssetBundle |
+| `tools/build_tracks.py` | each map resolved into a racing line, road widths, pickups, respawns, surfaces |
+| `tools/tracks_to_gdscript.py` | the tracks as GDScript |
+
+`port/scripts/data/` holds `game_db.gd` (814 definitions, indexed by id),
+`handling.gd` (the 6 handling profiles), `tracks.gd` (16 tracks) plus
+`catalog/pickups/modes/misc.gd`.
+
+The ported systems in `port/scripts/`: `track_builder.gd` (road mesh and
+collision from the recovered spline and per-knot widths), `race_director.gd`
+(checkpoint laps, live positions, timing), `pickup_spawner.gd` (weighted rolls
+from the recovered `PickupTable`s), `kart_ai.gd` (look-ahead and drift from the
+recovered `RaceKartAIDefinition`), `handling_profile.gd` (loads any of the six
+profiles plus their seven per-surface grip modifiers), `race_hud.gd` and
+`touch_controls.gd`.
+
+Verification, all green:
+
+```
+test_recovered_tuning     40 checks   the original 34 plus the 6 profiles
+test_game_db              73 checks   every definition loads and every _refID resolves
+test_all_tracks           52 checks   all 16 tracks build into real geometry
+test_race_integration     19 checks   the race actually runs end to end
+```
+
+### 5.4 Remaining work
+
+1. **Art** — meshes and textures now extract (UnityPy's OBJ exporter decodes
+   the stream vertex format this game's meshes use), but nothing is wired into
+   the scenes yet.
+2. **Audio** — FMOD banks → Ogg/WAV for Godot.
+3. **Battle maps** — the arenas are recovered (pickups, respawns, surfaces) but
+   have no racing line, so `TrackBuilder` correctly produces no road for them.
+4. **Bulk Ghidra decompilation** of the remaining ~13,570 game methods.
 
 ### 5.4 Recovering the tuning values
 

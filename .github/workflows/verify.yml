@@ -28,7 +28,10 @@ jobs:
       - name: Analysis tools are pure-stdlib and CLI-functional
         run: |
           set -euo pipefail
-          for t in tools/macho_slice.py tools/il2cpp_triage.py tools/unity_defs_to_gdscript.py; do
+          for t in tools/macho_slice.py tools/il2cpp_triage.py tools/unity_defs_to_gdscript.py \
+                   tools/dump_definitions.py tools/game_defs_to_gdscript.py \
+                   tools/extract_assets.py tools/build_tracks.py \
+                   tools/tracks_to_gdscript.py; do
             echo "::group::$t"
             python3 -m py_compile "$t"
             # --help must work without optional deps installed: these tools
@@ -78,6 +81,27 @@ jobs:
       - name: Boot the scene (catches runtime errors a parse check misses)
         run: godot --headless --path port --quit-after 300
 
+      - name: Recovered game database loads and is internally consistent
+        # All 814 shipped ScriptableObjects reach the port as compile-time
+        # constants, cross-referenced by id. This asserts they load and that
+        # every `_refID` in the database resolves to a real definition --
+        # a dangling id would leave a kart's wheels or a pickup table's
+        # contents silently empty while the project still built and ran.
+        run: godot --headless --path port --script res://tests/test_game_db.gd
+
+      - name: Every recovered track builds into real geometry
+        # 16 maps decoded into racing lines, road widths, pickups and
+        # respawns. Only one is wired into the main scene, so all 16 are built
+        # here to stop a fault in the other 15 sitting undiscovered.
+        run: godot --headless --path port --script res://tests/test_all_tracks.gd
+
+      - name: The race actually runs end to end
+        # A scene that imports, boots and logs no errors proves very little:
+        # an empty track with stationary karts is also "no errors". This
+        # drives the real scene and asserts the kart moves, checkpoints
+        # advance, laps turn over and the pickups match the recovered count.
+        run: godot --headless --path port --script res://tests/test_race_integration.gd
+
       - name: Recovered tuning regression test
         # This is the load-bearing check. It asserts the game's own numbers --
         # 78 scalars and 15 AnimationCurve keyframes read out of the shipped
@@ -113,3 +137,28 @@ jobs:
           assert u.gdscript_float(3.0) == "3.0"
           print("ok: generator helpers are stable")
           PY
+
+      - name: Regenerating the recovered data must be reproducible
+        # The generated GDScript data layer is committed, so prove it is still
+        # exactly what the extractors produce from the committed recovery
+        # artifacts. Byte-identical output means the tools and the checked-in
+        # data have not drifted apart.
+        #
+        # work/assets/{definitions/definitions.json,tracks.json} are committed
+        # for exactly this reason: re-deriving them needs the 1.2 GB DMG and
+        # UnityPy, but re-deriving the GDScript from them needs neither.
+        run: |
+          set -euo pipefail
+          # No UnityPy needed here: these generators read the committed JSON,
+          # which is what makes this check cheap enough to always run. UnityPy
+          # is only required to go from the DMG to that JSON in the first place.
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          cp -r port/scripts/data "$work/before"
+          python3 tools/game_defs_to_gdscript.py work/assets/definitions/definitions.json
+          python3 tools/tracks_to_gdscript.py work/assets/tracks.json port/scripts/data/tracks.gd
+          for f in game_db.gd handling.gd tracks.gd catalog.gd pickups.gd modes.gd misc.gd; do
+            cmp "$work/before/$f" "port/scripts/data/$f" \
+              || { echo "::error::port/scripts/data/$f drifted from its generator"; exit 1; }
+            echo "  $f reproduces byte-identically"
+          done

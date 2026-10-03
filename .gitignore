@@ -27,7 +27,32 @@ _binwalk/
 *.pcapng
 /scratch/
 /tmp/
-/work/
+
+# NOTE: do not add a bare `/work/` here. Git cannot re-include a file whose
+# parent directory is excluded, so `/work/` would make the negations below
+# unreachable. `/work/*` excludes the contents without excluding the directory
+# itself, which is what makes the versioning below work.
+
+# The recovered GAME DATA is versioned, because it is the deliverable: it is
+# what the Godot port is built from, and reviewing it should not require
+# re-running the extraction over a 1.2 GB DMG.
+#
+# Only the authoritative datasets are kept. Two bulky intermediates stay
+# ignored because they are the same information in a worse layout and the
+# committed tools regenerate them byte-identically:
+#   work/assets/definitions/by_class/  814 per-definition JSONs -- a mechanical
+#                                      split of definitions.json
+#   work/assets/scenes/*/scene.json    raw scene graphs, 24 MB, whose resolved
+#                                      form is tracks.json
+/work/*
+!/work/assets/
+!/work/assets/definitions/
+!/work/assets/definitions/definitions.json
+!/work/assets/definitions/index.json
+!/work/assets/definitions/name_table.json
+/work/assets/definitions/by_class/
+/work/assets/scenes/
+!/work/assets/tracks.json
 
 # DMG / macOS extraction artifacts — large, licensed, and regenerable.
 # Exception: games/ holds the source .dmg we deliberately version via Git LFS
