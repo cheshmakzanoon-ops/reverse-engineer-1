@@ -1,6 +1,10 @@
 [gd_scene load_steps=2 format=3]
 
-[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="Script" path="res://scripts/race_main.gd" id="1_race"]
 
 [node name="Main" type="Node3D"]
-script = ExtResource("1_main")
+script = ExtResource("1_race")
+track_id = "map_racearlenspeedway"
+mode = "race"
+field_size = 6
+difficulty = "Hard"

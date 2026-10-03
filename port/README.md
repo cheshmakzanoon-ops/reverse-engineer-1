@@ -4,27 +4,58 @@ Target for the reverse-engineering effort in [`docs/RE-FINDINGS.md`](../docs/RE-
 The game code was recovered from a macOS IL2CPP binary; this project is the
 reimplementation.
 
-## Current state — physics ported, builds and runs
+## Current state — a playable race on the recovered tracks
 
 ```
-build/warped-kart-racers.apk     55 MB   signed debug APK
+build/warped-kart-racers.apk     58 MB   signed debug APK
 package   com.electricsquare.atlas.re   versionName 2.02
 arch      arm64-v8a, x86_64
 signing   APK Signature Scheme v2 + v3 (verified)
 ```
 
+The default scene is a full race on **Arlen Speedway**, a track recovered from
+the game's own map AssetBundle: a 1489.8 m racing line with the game's road
+widths, 52 pickup boxes on their recovered spots, 696 respawn locations, and a
+six-kart field where the AI drives the shipped `RaceKartAIDefinitionHard_NineAI`
+profile on the `KartPhysicsHandlingRaceAI` handling profile.
+
 Verified by execution, not assumed:
 
 ```bash
 godot --headless --path . --import                       # clean, no script errors
-godot --headless --path . --quit-after 120               # runs, no runtime errors
+godot --headless --path . --quit-after 1800              # runs, no runtime errors
+for t in test_recovered_tuning test_game_db test_all_tracks test_race_integration; do
+  godot --headless --path . --script "res://tests/$t.gd"
+done                                                      # 184 checks, all passing
 mkdir -p build
 godot --headless --path . --export-debug "Android" build/warped-kart-racers.apk
 /opt/android-sdk/build-tools/35.0.0/apksigner verify build/warped-kart-racers.apk
 ```
 
-The APK ships the ported classes — its `global_script_class_cache.cfg` lists
-`Kart`, `KartPhysicsHandling` and `DriftBoostLevel`.
+The APK ships 30 compiled scripts, including the full recovered data layer
+(`data/game_db`, `data/handling`, `data/tracks`, `data/catalog`,
+`data/pickups`, `data/modes`, `data/misc`) and every ported system.
+
+## The recovered data layer
+
+`scripts/data/` is generated from the game's shipped ScriptableObjects and map
+bundles — never hand-edited:
+
+| File | Contents |
+|---|---|
+| `game_db.gd` | all 814 definitions, indexed by id; `lookup()`/`resolve()` walk the graph |
+| `handling.gd` | the 6 `KartPhysicsHandling` profiles, with curves and surface tables |
+| `tracks.gd` | 16 tracks: control points, road widths, pickups, respawns, surfaces |
+| `catalog.gd` / `pickups.gd` / `modes.gd` / `misc.gd` | karts, characters, loot tables, modes, the rest |
+
+Regenerate from `work/assets/` with the `tools/dump_definitions.py`,
+`tools/game_defs_to_gdscript.py`, `tools/build_tracks.py` and
+`tools/tracks_to_gdscript.py` pipeline documented in the root `README.md`.
+
+One quirk worth knowing: `GameDB.lookup()` is deliberately case-insensitive.
+Five shipped chapters reference `IP_GENERIC` while the definition that actually
+ships is `IP_Generic`, and the original game resolves the mismatch — so the port
+does too, rather than "correcting" the recovered data.
 
 ## What is ported
 

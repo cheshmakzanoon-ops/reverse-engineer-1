@@ -34,10 +34,19 @@ var lost_control: bool = false
 var _steer_input: float = 0.0
 var _throttle: float = 0.0
 var _drift_direction: float = 0.0
-var _drift_elapsed: float = 0.0
 var _boost_timer: float = 0.0
 var _lost_control_timer: float = 0.0
 var _start_transform: Transform3D
+
+## Seconds the current drift has been held. Public because the HUD draws the
+## drift meter against the recovered `DriftBoostLevel.time_to_activate`
+## thresholds -- it is the same number the game uses to decide when a tier
+## fires, so exposing it is what keeps the meter honest.
+var drift_elapsed: float = 0.0
+
+## True while the kart is off the road or on a surface with its own modifiers.
+var current_surface_type: int = 0
+var _surface_modifiers: Dictionary = {}
 
 
 func _ready() -> void:
@@ -167,14 +176,14 @@ func _update_drift(delta: float) -> void:
 	if want_drift and not is_drifting:
 		is_drifting = true
 		_drift_direction = signf(_steer_input)
-		_drift_elapsed = 0.0
+		drift_elapsed = 0.0
 	elif not want_drift and is_drifting:
 		_release_drift()
 
 	if not is_drifting:
 		return
 
-	_drift_elapsed += delta
+	drift_elapsed += delta
 
 	# Clamp lateral velocity to the recovered drift grip so the kart slides
 	# instead of gripping, and scrub speed while sliding.
@@ -185,13 +194,13 @@ func _update_drift(delta: float) -> void:
 
 	# Level up through `_driftBoostLevelsTable` as the meter fills.
 	for level in handling.drift_boost_levels:
-		if level.is_valid() and _drift_elapsed >= level.time_to_activate:
+		if level.is_valid() and drift_elapsed >= level.time_to_activate:
 			trigger_boost(level.drift_boost_duration, level.drift_boost_ratio)
 
 
 func _release_drift() -> void:
 	is_drifting = false
-	_drift_elapsed = 0.0
+	drift_elapsed = 0.0
 	_drift_direction = 0.0
 
 
@@ -243,7 +252,34 @@ func _update_camera(delta: float) -> void:
 		chase_camera.look_at(global_position + global_transform.basis.z.normalized(), Vector3.UP)
 
 
+## Put the kart back on the track at the nearest recovered respawn location.
+##
+## Public because the AI calls it: `KartAI` respawns a kart wedged against
+## scenery using `_stuckAITimeToRespawn` from the recovered AI definition, and
+## the player's reset key does the same. `respawn_points` is supplied by the
+## race scene from `Tracks.respawn_locations()`; with none, the kart returns to
+## where it started.
+func respawn(respawn_points: Array = []) -> void:
+	var target := _start_transform
+	var best := INF
+	for entry in respawn_points:
+		var pos: Vector3 = entry.get("pos", Vector3.ZERO) if entry is Dictionary \
+			else Vector3(entry)
+		var d := pos.distance_to(global_position)
+		if d < best:
+			best = d
+			target = Transform3D(Basis(), pos)
+	global_transform = target
+	velocity = Vector3.ZERO
+	lost_control = false
+	_lost_control_timer = 0.0
+	is_boosting = false
+	_boost_timer = 0.0
+	_release_drift()
+
+
 func _respawn() -> void:
+	respawn()
 	global_transform = _start_transform
 	velocity = Vector3.ZERO
 	lost_control = false
