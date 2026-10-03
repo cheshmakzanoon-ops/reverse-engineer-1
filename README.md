@@ -15,11 +15,30 @@ Target is **Warped Kart Racers v2.02** (`games/`), a Unity 2021.3 IL2CPP build.
 |---|---|
 | DMG extracted, bundle characterized | done |
 | IL2CPP metadata recovered (`dump.cs`, 101 stub DLLs, 12,405 types) | done |
+| C# source tree generated — 8,038 files / 866,535 lines | done |
 | Kart handling model recovered (93 tuning fields, exact offsets) | done |
 | Real tuning values extracted from the game's ScriptableObjects | done — 78 scalars + 5 curves |
 | Core kart physics decompiled in Ghidra with real C# names | done (22 methods) |
 | Godot 4 port + signed Android APK | done — `port/`, 55 MB, arm64-v8a + x86_64 |
 | Art/audio assets, touch controls, other 5 handling profiles | **not done** |
+
+### What "recovered source" means here
+
+IL2CPP ships no C# — every method is compiled to ARM64 in `GameAssembly.dylib`.
+What exists is the game's *API surface*, rebuilt as real `.cs` files:
+
+```bash
+bash tools/il2cpp_to_csharp.sh          # DummyDll -> work/analysis/csharp
+```
+
+That gives every class, inheritance chain, field name and offset, method
+signature, enum and attribute — **including the developers' own `[Tooltip]` and
+`[Header]` comments**. Method *bodies* are empty; those need Ghidra, and only
+65 of 13,592 game methods have been decompiled.
+
+So this is a complete specification rather than compilable source. That is the
+right artifact for a port: rewrite bodies in GDScript from the signature, the
+recovered data values, and targeted decompilation of the algorithms you need.
 
 **Structure and the primary tuning values are both recovered.** The remaining
 port-side numbers (`steer_speed`, `gliding_speed`, `top_speed`,
@@ -105,6 +124,7 @@ tools/ghidra-scripts/
 tools/macho_slice.py             carve one arch out of a universal (fat) Mach-O
 tools/il2cpp_triage.py           query dump.cs: summary/ns/asm/type/find
 tools/unity_defs_to_gdscript.py  recover ScriptableObject values from a bundle
+tools/il2cpp_to_csharp.sh       rebuild the C# source tree from the stub DLLs
 port/                            Godot 4 project + Android export preset
 ```
 
