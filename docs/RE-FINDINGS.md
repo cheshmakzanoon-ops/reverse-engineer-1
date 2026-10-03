@@ -87,6 +87,36 @@ The ~4,300-type gap is a limitation of the flat-text parser, not missing data:
 in forms the type regex does not match. `DummyDll` has them all. Where they
 agree (naming, RVAs, field offsets) they agree exactly.
 
+### 2.1b The C# source tree
+
+The stub assemblies are not the end of the story — ILSpy turns them back into
+real `.cs` files:
+
+```bash
+bash tools/il2cpp_to_csharp.sh      # -> work/analysis/csharp
+```
+
+**8,038 files / 866,535 lines** across all 101 assemblies. Each file carries the
+full class definition, inheritance chain, field names with their object offsets,
+method signatures, enums, and attributes — and, valuably, **the original
+developers' `[Tooltip]` and `[Header]` comments**, which are the design intent
+written down in the source rather than inferred from behaviour:
+
+```csharp
+[FieldOffset(Offset = "0x30")]
+[Tooltip("Maximum In-Game speed, kart's velocity will be clamped to this if exceeded")]
+[SerializeField]
+protected float _speedHardCap;
+```
+
+**Method bodies are empty.** IL2CPP compiled them to native code; recovering
+those is the Ghidra job in §2.4. What this tree is therefore a *complete
+specification* of the game — every signature, offset and documented intent —
+which is what a port actually needs, since the bodies get rewritten anyway.
+
+The tool pins `ilspycmd` 8.2.0.7535 deliberately: the current latest (11.x)
+requires a newer .NET than this box has and fails to install.
+
 ### 2.2 Game code layout
 
 Game logic lives in **`Atlas.dll`** — **1,407 types, second only to mscorlib**
@@ -413,4 +443,6 @@ Honest about what is **not** done:
   redoing it. The `dmg2img`→`hpmount` path in the README does not apply —
   `tools/udif_extract.py` is the correct path for this LZFSE DMG.
 - **`dump.cs` text parser is lossy** (~8,088 of 12,405 types, §2.1). Use the
-  `DummyDll` assemblies for anything the parser misses.
+  `DummyDll` assemblies or the generated C# tree for anything it misses.
+- **The recovered C# has no method bodies** (§2.1b) — only 65 of 13,592 game
+  methods are decompiled. The tree is a specification, not compilable source.

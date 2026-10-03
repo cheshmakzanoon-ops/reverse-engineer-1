@@ -38,6 +38,15 @@ jobs:
             echo "::endgroup::"
           done
 
+      - name: Shell tools parse
+        run: |
+          set -euo pipefail
+          for s in tools/*.sh; do
+            echo "::group::$s"
+            bash -n "$s"
+            echo "::endgroup::"
+          done
+
       - name: No accidental dependency on UnityPy at import time
         run: |
           # unity_defs_to_gdscript.py needs UnityPy to actually extract, but it
