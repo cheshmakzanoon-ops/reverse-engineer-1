@@ -227,7 +227,12 @@ else
 fi
 
 log "Configuring Godot editor settings for Android export"
-SETTINGS="$HOME/.config/godot/editor_settings-${GODOT_TEMPLATE_VER%%.stable*}.tres"
+# Godot names this file editor_settings-<major>.<minor>.tres (e.g. 4.7.tres) --
+# NOT the full patch version, and not the export-templates dir name.
+GODOT_EDITOR_VER="$(printf '%s' "$GODOT_VERSION" | sed 's/-stable$//' | cut -d. -f1,2)"
+SETTINGS_DIR="$HOME/.config/godot"
+SETTINGS="$SETTINGS_DIR/editor_settings-${GODOT_EDITOR_VER}.tres"
+mkdir -p "$SETTINGS_DIR"
 [ -f "$SETTINGS" ] || printf '[gd_resource type="EditorSettings" format=3]\n\n[resource]\n' > "$SETTINGS"
 python3 - "$SETTINGS" "$JAVA_HOME" "$SDK_DIR" "$KEYSTORE" <<'PY'
 import sys
