@@ -28,6 +28,25 @@ _binwalk/
 /scratch/
 /tmp/
 
+# DMG / macOS extraction artifacts — large, licensed, and regenerable
+*.dmg
+*.img
+*.sparseimage
+/mnt/
+*.app/
+*.pkg
+*.mpkg
+
+# Godot + Android build output
+/build/
+*.apk
+*.aab
+*.idsig
+.godot/
+android/
+*.keystore
+!debug.keystore.example
+
 # Python
 __pycache__/
 *.py[cod]

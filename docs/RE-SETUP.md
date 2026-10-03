@@ -3,145 +3,312 @@
 Toolchain documentation for this repo. Everything here was installed and verified
 on **Ubuntu 22.04.5 LTS (x86_64)**.
 
-## TL;DR
+The project is: **extract a macOS game from a `.dmg`, understand its code and
+assets, then re-implement it in Godot 4 and ship it as an Android APK.**
 
-```bash
-bash scripts/install-re-tools.sh    # ~2 GB disk, needs root/sudo
-bash scripts/verify-re-tools.sh     # proves it works end to end
+```
+macOS .dmg ──► extract ──► Mach-O / asset analysis ──► Godot 4 ──► Android APK
+   dmg2img      hp*           Ghidra, rizin, LIEF          │         Android SDK
+   bsdtar       unzip         macholib, llvm-*              │         NDK, build-tools
 ```
 
-## What gets installed
+---
 
-| Tool | Location | Why |
-|---|---|---|
-| **Ghidra 12.1.4** | `/opt/ghidra` (symlink) → `/opt/ghidra_12.1.4_PUBLIC` | The decompiler. Headless (`analyzeHeadless`) for CI/scripts, GUI for manual work. |
-| **OpenJDK 21** | apt (`openjdk-21-jdk-headless`) | Ghidra 12.x **requires** JDK 21+. Not optional, not `default-jre`. |
-| **rizin 0.9.1** | `/opt/rizin/bin` → `/usr/local/bin` | Fast interactive disassembly, scripting, binary diffing. Static build from GitHub releases (not in apt). |
-| **file, xxd** | apt | Format identification and hex inspection. |
-| **binwalk** | apt (2.3.3) | Firmware/container extraction. |
-| **patchelf, upx-ucl** | apt | ELF surgery and packing/unpacking. |
-| **gdb, gdb-multiarch** | apt (12.1) | Dynamic analysis and debugging, multi-arch aware. |
-| **qemu-user-static** | apt | Emulate ARM/MIPS binaries on x86-64 for dynamic analysis. |
-| **ltrace, strace** | apt | Library and syscall tracing. |
-| **binutils** (`objdump`, `readelf`, `nm`, `strings`) | apt | Baseline ELF/Mach-O/PE inspection. |
-| **Python RE libs** | `/opt/re-tools/venv/bin/python` | `capstone` (disasm), `pefile` (PE), `lief` (multi-format parsing), `r2pipe` (drive rizin from Python), `pwntools`. |
+## ⚠️ Prerequisites — read this first
 
-### Why a venv
-
-Python RE libraries live in an isolated venv at `/opt/re-tools/venv`, **not** in
-system site-packages. This keeps the sandbox's Python intact and makes the set of
-libraries explicit and removable:
-
-```bash
-rm -rf /opt/re-tools/venv   # full Python-side uninstall
-```
-
-Activate it with `source /opt/re-tools/bin/activate`-style PATH entry — the installer
-writes `/etc/profile.d/re-tools.sh` exporting `GHIDRA_INSTALL_DIR`, `RE_TOOLS_VENV`,
-and the venv's `PATH`. Re-login or `source /etc/profile.d/re-tools.sh`.
-
-## Running Ghidra headless
-
-`analyzeHeadless <project_dir> <project_name> -import <binary> -postScript <script>`
-
-Decompile every function to C, skipping thunks/externals:
-
-```bash
-/opt/ghidra/support/analyzeHeadless /tmp/ghidra-proj myproj \
-  -import ./target.bin \
-  -scriptPath tools/ghidra-scripts \
-  -postScript DecompileAll.java /tmp/target.c nolibs
-```
-
-- First arg pair is a **project location + name**, not a filename. Ghidra stores
-  analysis state there; use a fresh dir per target or pass `-deleteProject`.
-- The `nolibs` argument to `DecompileAll.java` skips thunks and external symbols.
-  Drop it to include everything.
-- The GUI (`/opt/ghidra/ghidraRun`) is available when you want interactive work.
-  In a headless container use `support/analyzeHeadless`.
-
-### The `DecompileAll.java` script
-
-`tools/ghidra-scripts/DecompileAll.java` decompiles every function to one C-like
-file and inlines the string literals each function references — usually the fastest
-way to identify what an unknown function does.
-
-> ### Gotcha: exit code 0 does not mean it worked
+> **Every tool listed in this document is a prerequisite for working on this
+> project. Any development environment used for this reverse-engineering work
+> must have this toolchain fully installed and verified before analysis begins.**
 >
-> `analyzeHeadless` **returns 0 even when the `-postScript` fails to compile.**
-> Grep the output for `ERROR` / `SCRIPT ERROR`, and assert on the generated file:
+> Install and verify in one step each:
+>
+> ```bash
+> bash scripts/install-re-tools.sh
+> bash scripts/verify-re-tools.sh
+> ```
+>
+> `verify-re-tools.sh` must report **0 failed** before you start. A partially
+> installed toolchain fails confusingly much later — a missing Android SDK only
+> surfaces at export time, after hours of porting work.
+
+The pipeline has four hard dependencies that are easy to miss:
+
+1. **A JDK, not a JRE.** Ghidra 12 compiles `.java` scripts at runtime. Without
+   the `jdk-headless` package, headless decompilation silently produces nothing.
+2. **Android SDK + NDK + build-tools + export templates.** Godot cannot produce an
+   APK without all three, plus a debug keystore.
+3. **`clang`-class build tools** (cmake/ninja/scons) for building GDExtension and
+   native modules.
+4. **~12 GB of free disk.** Export templates are ~2 GB installed and the NDK is
+   ~2.4 GB.
+
+---
+
+## Install
+
+```bash
+bash scripts/install-re-tools.sh    # needs root/sudo; idempotent
+bash scripts/verify-re-tools.sh     # must report 0 failed
+```
+
+---
+
+## What's installed
+
+### Extraction (DMG / HFS+ / pkg)
+
+| Tool | Location | Purpose |
+|---|---|---|
+| `dmg2img` | apt (1.6.7) | DMG → raw HFS+ disk image |
+| `hpmount`, `hpcopy`, `hpumount` | apt (`hfsplus`) | Mount/read HFS+ images. **Note the `hp*` prefix** — there is no bare `hfsplus` command. |
+| `bsdtar` (libarchive) | apt | Archive extraction incl. `cpio`, `xar` readers |
+| `7z` / `7za` | apt (`p7zip-full`) | Zip, gzip, xar |
+| `unzip` | apt | Standard zip |
+
+### Binary / code analysis
+
+| Tool | Location | Purpose |
+|---|---|---|
+| **Ghidra 12.1.4** | `/opt/ghidra` | Primary decompiler. Headless for scripts, GUI for manual work. |
+| **OpenJDK 21** | apt | Ghidra 12.x requires JDK 21+. |
+| **rizin 0.9.1** | `/opt/rizin` | Fast disassembly, scripting, binary diffing. |
+| **LIEF 1.0** | venv | Mach-O/PE/ELF parsing, library introspection. |
+| **macholib** | venv | Pure-Python Mach-O parsing (dylibs, load commands, fat binaries). |
+| **llvm-objdump / llvm-readobj / llvm-nm** | apt (LLVM 14) | GNU binutils has poor Mach-O support; LLVM handles x86_64 + aarch64 Mach-O correctly. |
+| **capstone** | venv | Disassembly from Python |
+| **z3-solver** | venv | Constraint solving for key checks / serial validation |
+| **construct** | venv | Declarative binary parsing for unknown formats |
+| gdb-multiarch, ltrace, strace, qemu-user-static | apt | Dynamic analysis; run ARM/MIPS binaries on x86-64 |
+| `pefile` | venv | PE parsing (for Unity IL2CPP side-by-side) |
+
+### Engine / asset tooling
+
+| Tool | Location | Purpose |
+|---|---|---|
+| **.NET SDK 8** | `/opt/dotnet` | Runs **AssetRipper** (Unity assets), **Il2CppDumper**, ILSpy. Cross-platform, so no Wine needed. |
+| **Mono 6.8** + `monodis` | apt | Runs/decompiles MonoGame and other Mono/.NET game builds. |
+| **Godot 4.7.2** | `/opt/godot` | Port target + Android export. |
+| Godot export templates | `~/.local/share/godot/export_templates/4.7.2.stable` | **Required** to export; the editor alone cannot build an APK. |
+| ffmpeg, ImageMagick | apt | Audio/video/texture conversion for imported assets |
+
+### Android build
+
+| Tool | Location | Purpose |
+|---|---|---|
+| Android SDK cmdline-tools | `/opt/android-sdk` | `sdkmanager`, `apkanalyzer`, `d8` |
+| platform-tools (`adb`) | `/opt/android-sdk/platform-tools` | Device install/debug |
+| platforms;android-35 | `/opt/android-sdk/platforms` | Compile against |
+| build-tools;35.0.0 | `/opt/android-sdk/build-tools` | `aapt2`, `apksigner`, `zipalign` |
+| ndk;29.0.14206865 | `/opt/android-sdk/ndk` | Native builds / GDExtension |
+| cmake;3.22.1 | `/opt/android-sdk/cmake` | Godot's Android build requires it |
+| debug keystore | `~/.android/debug.keystore` | Required to sign debug APKs |
+
+---
+
+## Workflow
+
+### 1. Extract the DMG
+
+```bash
+mkdir -p ~/work/game && cd ~/work/game
+cp /path/to/game.dmg .
+dmg2img game.dmg game.img          # DMG -> raw HFS+ image
+mkdir mnt && hpmount game.img mnt  # HFS+ image -> mountpoint
+cp -a mnt/'Game.app' ./            # grab the bundle
+hpumount mnt
+```
+
+If the DMG has a UDIF resource-fork wrapper that `dmg2img` can't fully unpack,
+try `7z x game.dmg` first, or `binwalk game.dmg`.
+
+Inside a `.app` bundle, expect:
+
+```
+Game.app/Contents/
+├── Info.plist           # bundle id, version, minimum macOS
+├── MacOS/Game           # the Mach-O executable
+├── Frameworks/          # dylibs (Unity, Mono, SDL, ...)
+├── Resources/           # assets, Data/, *.bundle
+└── _CodeSignature/      # code signature (ignore; we do not strip it)
+```
+
+### 2. Identify the engine — do this before anything else
+
+```bash
+file Game.app/Contents/MacOS/Game
+strings Game.app/Contents/MacOS/Game | grep -iE 'unity|unreal|godot|monogame|gamemaker|cocos|sdl'
+ls Game.app/Contents/Frameworks/
+```
+
+This determines your whole toolchain. See **Engine-specific notes** below.
+
+### 3. Analyze
+
+```bash
+# Headless decompile of the main executable
+/opt/ghidra/support/analyzeHeadless /tmp/ghidra-proj gameproj \
+  -import Game.app/Contents/MacOS/Game \
+  -scriptPath tools/ghidra-scripts \
+  -postScript DecompileAll.java /tmp/game.c nolibs
+
+# Mach-O specifics GNU binutils handles poorly
+llvm-objdump -d --macho Game.app/Contents/MacOS/Game | less
+lief.parse('Game.app/Contents/MacOS/Game').libraries      # in the venv
+```
+
+> **Gotcha: `analyzeHeadless` exits 0 even when the `-postScript` fails to
+> compile.** Check the log for `ERROR` / `SCRIPT ERROR` and assert the output
+> file is non-empty:
 >
 > ```bash
 > grep -iE 'error|SCRIPT ERROR' ghidra.log
-> test -s /tmp/target.c || echo "decompile produced nothing"
+> test -s /tmp/game.c || echo "decompile produced nothing"
 > ```
->
-> `scripts/verify-re-tools.sh` exists precisely because of this — it judges success
-> by checking the decompiled output, not the exit status.
 
-Java scripts are compiled on demand at runtime, so an API typo surfaces as a
-`ClassNotFoundException` at runtime, not at install. The compile error is in the
-log just above it — read upward.
-
-## Quick triage commands
+### 4. Port to Godot and export
 
 ```bash
-file ./target.bin                       # what format/arch is this?
-readelf -h ./target.bin                 # ELF header
-objdump -d ./target.bin | less          # full disassembly
-nm -C ./target.bin | grep -i check      # find a symbol
-strings -n 6 ./target.bin | less        # printable strings
-rizin -qc 'aaa; afl' ./target.bin       # rizin: analyse and list functions
-rizin -qc 'aaa; pdf @main' ./target.bin # rizin: print main
-binwalk ./firmware.bin                  # scan / extract firmware
-patchelf --print-rpath ./target.bin     # inspect ELF runtime paths
+godot --headless --path ~/work/port --import
+godot --headless --path ~/work/port --export-debug "Android" build/game.apk
 ```
+
+Godot project settings required for Android export:
+
+```ini
+[rendering]
+textures/vram_compression/import_etc2_astc=true
+```
+
+Godot editor settings (`~/.config/godot/editor_settings-*.tres`) are pre-configured
+by the installer with `java_sdk_path`, `android_sdk_path` and the debug keystore.
+
+---
+
+## Engine-specific notes
+
+**Custom / native C++** — hardest. Decompile the Mach-O, then reimplement
+behaviour in GDScript or a GDExtension. `tools/ghidra-scripts/DecompileAll.java`
+plus rizin's `afl`/`pdf` are the workhorses.
+
+**Unity (Mono)** — `Resources/unity default resources`, `Assembly-CSharp.dll`.
+Use .NET tooling: `ilspycmd` or ILSpy for `Assembly-CSharp.dll`, which recovers
+readable C# directly. Start there before touching the native binary.
+
+**Unity (IL2CPP)** — the real difficulty. Code is compiled to C++, so you get
+Mach-O plus a `global-metadata.dat`. Use **Il2CppDumper** (via the installed
+.NET SDK) to recover type/method names, then feed that to Ghidra so the
+decompilation reads like the original C#. **AssetRipper** recovers Unity assets.
+
+**Unreal** — assets are in `.pak`/`.ucas`/`.utoc`; use **FModel** or **UModel**.
+Gameplay is C++ in a monolithic binary; expect heavy Ghidra work.
+
+**MonoGame / .NET** — easiest case. `monodis` or ILSpy on the game assembly
+usually recovers most logic almost directly.
+
+**Godot** — if the source game is already Godot, `PCK` files hold the assets and
+GDScript can be decompiled with `gdsdecomp`. Porting is then mostly reassembly.
+
+**Note on copy protection:** if the DMG is FairPlay-encrypted or the binary is
+protected with a packer/DRM, this workflow does not apply and we won't circumvent
+it. Packed-but-unencrypted binaries (`upx` is installed) are a different, tractable
+problem.
+
+---
+
+## Python libraries
+
+Isolated venv at `/opt/re-tools/venv` — never touches system Python, and fully
+removable with `rm -rf /opt/re-tools/venv`.
+
+```bash
+/opt/re-tools/venv/bin/python -c "import lief; print(lief.__version__)"
+```
+
+---
+
+## Environment variables
+
+`/etc/profile.d/re-tools.sh` is sourced by login shells:
+
+| Variable | Value |
+|---|---|
+| `GHIDRA_INSTALL_DIR` | `/opt/ghidra` |
+| `RE_TOOLS_VENV` | `/opt/re-tools/venv` |
+| `GODOT_BIN` | `/opt/godot/Godot_v4.7.2-stable_linux.x86_64` |
+| `ANDROID_HOME` / `ANDROID_SDK_ROOT` | `/opt/android-sdk` |
+| `ANDROID_NDK_HOME` | `/opt/android-sdk/ndk/29.0.14206865` |
+| `DOTNET_ROOT` | `/opt/dotnet` |
+
+Re-login or `source /etc/profile.d/re-tools.sh` after a fresh install.
+
+---
 
 ## Runtime pinning
 
-The installer pins versions at the top of `scripts/install-re-tools.sh`:
+Versions are pinned at the top of `scripts/install-re-tools.sh`:
 
 ```bash
 GHIDRA_VERSION="12.1.4"
-GHIDRA_BUILD="20260921"
 RIZIN_VERSION="0.9.1"
+GODOT_VERSION="4.7.2-stable"
+ANDROID_CMDLINE_TOOLS="13114758"
+ANDROID_PLATFORM="android-35"
+ANDROID_BUILD_TOOLS="35.0.0"
+ANDROID_NDK="29.0.14206865"
+ANDROID_CMAKE="3.22.1"
+DOTNET_CHANNEL="8.0"
 ```
 
-Bump these and re-run to upgrade. Verify Ghidra still runs afterwards — major
-versions have bumped the JDK requirement (Ghidra 10 → JDK 17, Ghidra 11+ → JDK 21).
+Bump and re-run to upgrade. Re-run `verify-re-tools.sh` afterwards — Godot in
+particular has bumped its JDK requirement across major versions.
+
+---
 
 ## Repo layout
 
 ```
 docs/RE-SETUP.md                 this file
 scripts/install-re-tools.sh      idempotent toolchain installer
-scripts/verify-re-tools.sh       smoke test, incl. a real Ghidra decompilation
+scripts/verify-re-tools.sh       smoke test: decompilation + real Android export
 tools/ghidra-scripts/
   DecompileAll.java              headless post-script: decompile all functions
 ```
 
-Analysis outputs (decompiled sources, rizin projects, extracted firmware) are
-build artifacts, not source. They are gitignored — regenerate them with the
-commands above rather than committing them.
+---
 
 ## Troubleshooting
 
-**`Unable to determine JAVA_HOME` / Ghidra won't launch**
-Ghidra 12 needs JDK 21. Check `java -version` and that `openjdk-21-jdk-headless`
-is installed; the `jdk-headless` package is required (not just a JRE) because
-Ghidra compiles `.java` scripts at runtime.
+**Ghidra decompiles nothing / `ClassNotFoundException`**
+The `.java` script failed to compile — the real error is a few lines *above* that
+message in the log. Godot/Ghidra 12 API notes: `Data` is in
+`ghidra.program.model.listing` (not `.data`), `getReferencesFrom()` returns a
+`Reference[]`, and `Symbol.getValue()` does not exist.
+
+**`hfsplus: command not found`**
+There is no bare `hfsplus` binary; use `hpmount` / `hpcopy` / `hpumount`.
+
+**GNU `objdump` says `file format not recognized`**
+That's expected for Mach-O. Use `llvm-objdump`.
+
+**Godot: "A valid Java SDK path is required"**
+`export/android/java_sdk_path` is empty in editor settings. The installer sets it;
+check `~/.config/godot/editor_settings-*.tres`.
+
+**Godot: "ETC2/ASTC texture compression is required"**
+Add `textures/vram_compression/import_etc2_astc=true` under `[rendering]`.
+
+**Godot: "Target folder does not exist"**
+Godot won't create the export directory. `mkdir -p build` first.
+
+**Export templates not found**
+The directory must be named `<version>.stable` (e.g. `4.7.2.stable`) — *not* the
+full `godot --version` string, which includes a build hash Godot doesn't use here.
+
+**`.pkg` inside the DMG won't extract**
+`xar` has no Linux package. `bsdtar` and `7z` both carry xar readers, but this is
+unverified without a real macOS `.pkg`. If it fails, extract on a Mac and copy the
+payload out.
 
 **Out of memory during analysis**
-Set `MAXMEM` in `support/launch.properties` (Ghidra reads it), or constrain a
-run with `-analysisTimeoutPerFile <seconds>`.
-
-**Ghidra says the file format is unsupported**
-The loader is missing. `file` and `readelf` first: plain ELF/PE/Mach-O are always
-supported. Firmware blobs often need binwalk to unpack into a recognisable
-container before Ghidra will load them.
-
-**`ClassNotFoundException` after editing a `.java` script**
-It failed to compile. The real error is a few lines above it in the log.
-Ghidra 12's API notes: `Data` is in `ghidra.program.model.listing` (not
-`.data`), `SymbolTable.getReferencesFrom()` returns a `Reference[]` (not an
-iterator), and `Symbol.getValue()` does not exist.
+Set `MAXMEM` in Ghidra's `support/launch.properties`, or bound a run with
+`-analysisTimeoutPerFile <seconds>`.
