@@ -54,6 +54,11 @@ _binwalk/
 /work/assets/scenes/
 !/work/assets/tracks.json
 
+# Stale partial dump (3 of 55 classes) written by an older version of
+# tools/unity_defs_to_gdscript.py. Superseded by definitions.json, which covers
+# it in full; the tool no longer writes this file or references it.
+/work/assets/definitions_raw.json
+
 # DMG / macOS extraction artifacts — large, licensed, and regenerable.
 # Exception: games/ holds the source .dmg we deliberately version via Git LFS
 # (see .gitattributes). Derived images stay ignored.
