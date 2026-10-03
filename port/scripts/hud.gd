@@ -190,11 +190,13 @@ func show_results(results: Array) -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.text = "RESULTS"
 
-	var sorted := results.duplicate()
-	sorted.sort_custom(func(a, b): return float(a["time"]) < float(b["time"]))
-	for i in sorted.size():
+	# Director already places finishers first, then DNFs by validated progress.
+	# Sorting -1 (DNF) as a time would incorrectly promote it to first place.
+	for i in results.size():
 		var row := _mk_label(box, 22, Color(1, 1, 1))
-		row.text = "%d.   %s" % [i + 1, RaceDirector.format_time(float(sorted[i]["time"]))]
+		var result: Dictionary = results[i]
+		var time_text := RaceDirector.format_time(float(result["time"])) if bool(result.get("finished", true)) else "DNF"
+		row.text = "%d.  %s  %s" % [i + 1, result.get("name", "Kart"), time_text]
 
 
 static func _ordinal(n: int) -> String:

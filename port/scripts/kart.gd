@@ -1,21 +1,8 @@
-## Kart behaviour, ported from `Atlas.Gameplay.Kart.KartPhysics`
-## (recovered from `GameAssembly.dylib`).
-##
-## `KartPhysics` in the original is a MonoBehaviour wrapping a Unity Rigidbody
-## plus a ground `Physics.Raycast` (recovered at RVA 0x1257744 -- see
-## work/analysis/ghidra/physics.c, where the probe distance decompiles as the
-## float constant 0x40200000 == 2.5f).
-##
-## Godot's CharacterBody3D stands in for Rigidbody + capsule collider: it gives
-## the same arcade control loop without fighting a physics engine, and it keeps
-## the port readable as a direct translation of the C#.
-##
-## IMPORTANT: all tuning numbers come from `handling`, whose defaults are the
-## game's OWN recovered values (see kart_physics_handling.gd). The recovered
-## curves are in ABSOLUTE speed units, so they are sampled by raw speed.
-##
-## Control flow mirrors the original's recovered method names:
-##   InitPhysics -> accel/brake/steer -> drift -> boost -> collision.
+## PORT-SIDE CharacterBody3D controller using recovered handling definitions.
+## Native method names and tuning inform this implementation; replacing a Unity
+## Rigidbody with CharacterBody3D is NOT proof of equivalent native behavior.
+## Steering, drift control and collision response require reference-game tests.
+## The documented native ground-probe constant is 2.5 (RVA 0x1257744).
 
 class_name Kart
 extends CharacterBody3D

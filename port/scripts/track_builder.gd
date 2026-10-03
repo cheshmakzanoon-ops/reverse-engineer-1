@@ -1,27 +1,13 @@
-## Builds a playable road mesh and collision from the recovered track data.
-##
-## The track's shape is not invented here. `Tracks.route_knots()` returns the
-## game's own spline control points, and each point carries the road half-widths
-## the level shipped with (`_leftWidth` / `_rightWidth` on
-## `MainSplineKnotBehaviour`). Those two facts fully determine the road surface:
-## between consecutive control points the road is a quad whose corners are the
-## points pushed left and right by their own widths. Nothing is smoothed or
-## guessed, so the built road matches the recovered layout.
-##
-## The one thing added is resampling. The game builds its road with
-## `SplineBehaviour._resolution` samples per segment; control points here are
-## 6-70 units apart, which is far too coarse to drive on, so the Catmull-Rom
-## spline is evaluated between control points. Where the control points already
-## sit on a curve this reproduces the game's own sampling; where they are
-## sparse it fills in the arc the original spline would have drawn.
+## PORT-SIDE road/collision reconstruction from recovered route knots/widths.
+## Centripetal interpolation, strip topology and materials are implementations,
+## not recovered original level meshes or proof of native spline equivalence.
 
 class_name TrackBuilder
 extends Node3D
 
 const Tracks := preload("res://scripts/data/tracks.gd")
 
-## Road surface tint. Kept plain because no art is wired in yet; everything
-## about the GEOMETRY is recovered, only the material is a placeholder.
+## Placeholder tint; original track art is not integrated.
 @export var road_color: Color = Color(0.22, 0.23, 0.26)
 @export var shoulder_color: Color = Color(0.62, 0.20, 0.22)
 
@@ -59,14 +45,14 @@ func build(id: String, route: int = 0) -> float:
 
 	var loop: bool = Tracks.get_track(id)["routes"][route]["loop"]
 	var centres := _resample(knots, loop)
-	_build_road(centres, loop, id)
+	_build_road(centres, loop, knots)
 	_build_kerbs(centres, loop)
 	return Tracks.track_length(id)
 
 
 ## Catmull-Rom interpolation of the recovered control points.
 ##
-## Unity's own spline uses centripetal Catmull-Rom, which is what keeps a
+## PORT-SIDE centripetal Catmull-Rom (native interpolation parity unproven) keeps a
 ## spline from overshooting when two control points are far apart -- and here
 ## they can be 70 units apart. Uniform Catmull-Rom visibly bulges on those, so
 ## the centripetal form is used.
@@ -152,8 +138,8 @@ func _frames(centres: PackedVector3Array, loop: bool) -> Array:
 	for i in n:
 		var next_i := (i + 1) % n
 		var prev_i := (i - 1 + n) % n
-		var a: Vector3 = centres[prev_i] if (loop or prev_i != i) else centres[i]
-		var b: Vector3 = centres[next_i] if (loop or next_i != i) else centres[i]
+		var a: Vector3 = centres[prev_i] if loop or i > 0 else centres[i]
+		var b: Vector3 = centres[next_i] if loop or i < n - 1 else centres[i]
 		var fwd := (b - a)
 		if fwd.length_squared() < 1e-8:
 			fwd = Vector3.FORWARD
@@ -167,17 +153,11 @@ func _frames(centres: PackedVector3Array, loop: bool) -> Array:
 	return out
 
 
-func _build_road(centres: PackedVector3Array, loop: bool, id: String) -> void:
-	var knots := Tracks.route_knots(id)
+func _build_road(centres: PackedVector3Array, loop: bool, knots: Array) -> void:
 	var widths := _widths_at(knots, loop)
 	if widths.size() != centres.size():
-		# Resampling and width interpolation must agree; if they ever drift the
-		# mesh would be built from mismatched arrays and quietly come out wrong.
-		push_warning("TrackBuilder: %d points vs %d widths; using uniform width"
-				% [centres.size(), widths.size()])
-		widths = []
-		for i in centres.size():
-			widths.append([5.0, 5.0])
+		push_error("TrackBuilder: road points and widths disagree")
+		return
 
 	var frames := _frames(centres, loop)
 	var n := frames.size()
@@ -208,9 +188,11 @@ func _build_road(centres: PackedVector3Array, loop: bool, id: String) -> void:
 		var c: Vector3 = p1 + r1 * float(w1[1]) - u1 * 0.1
 		var d: Vector3 = p1 - r1 * float(w1[0]) - u1 * 0.1
 
-		for tri: Array in [[a, b, c], [a, c, d]]:
+		# Godot front faces are clockwise. The old winding faced DOWN,
+		# so karts fell through the road and wedged against triangle edges.
+		for tri: Array in [[a, c, b], [a, d, c]]:
 			for corner: Vector3 in tri:
-				surface.set_normal(Vector3.UP)
+				surface.set_normal((tri[2] - tri[0]).cross(tri[1] - tri[0]).normalized())
 				surface.add_vertex(corner)
 
 	var mat := StandardMaterial3D.new()
@@ -269,22 +251,44 @@ func _build_kerbs(centres: PackedVector3Array, loop: bool) -> void:
 		add_child(mi)
 
 
-## Centreline points spaced `spacing` metres apart, for lap progress and AI.
-func sample_along(centres: PackedVector3Array, spacing: float) -> PackedVector3Array:
+## PORT-SIDE uniform arc-length sampling; never extrapolate beyond a segment.
+## A closed route includes its seam and omits the duplicate first endpoint.
+func sample_along(centres: PackedVector3Array, spacing: float, loop: bool = false) -> PackedVector3Array:
+	return sample_course(centres, [], spacing, loop)["points"]
+
+func sample_course(centres: PackedVector3Array, widths: Array, spacing: float, loop: bool) -> Dictionary:
 	var out := PackedVector3Array()
-	if centres.is_empty():
-		return out
-	var carry := 0.0
+	var bounds: Array[Vector2] = []
+	var result := {"points": out, "widths": bounds}
+	if centres.is_empty() or spacing <= 0.0 or not is_finite(spacing):
+		return result
+	if not widths.is_empty() and widths.size() != centres.size():
+		push_error("TrackBuilder: sample points/widths disagree")
+		return result
 	out.append(centres[0])
-	for i in range(centres.size() - 1):
-		var a: Vector3 = centres[i]
-		var b: Vector3 = centres[i + 1]
-		var seg := a.distance_to(b)
-		if seg < 1e-5:
+	if not widths.is_empty():
+		bounds.append(Vector2(widths[0][0], widths[0][1]))
+	var remaining := spacing
+	var count := centres.size() if loop else centres.size() - 1
+	for i in count:
+		var a := centres[i]
+		var next := (i + 1) % centres.size()
+		var b := centres[next]
+		var length := a.distance_to(b)
+		if length < 0.000001:
 			continue
-		var d := carry
-		while d < seg:
-			d += spacing
-			out.append(a.lerp(b, d / seg))
-		carry = d - seg
-	return out
+		var distance := remaining
+		while distance <= length:
+			var fraction := distance / length
+			var point := a.lerp(b, fraction)
+			if not (loop and i == count - 1 and point.is_equal_approx(centres[0])):
+				out.append(point)
+				if not widths.is_empty():
+					bounds.append(Vector2(widths[i][0], widths[i][1]).lerp(Vector2(widths[next][0], widths[next][1]), fraction))
+			distance += spacing
+		remaining = distance - length
+	if not loop and not out[-1].is_equal_approx(centres[-1]):
+		out.append(centres[-1])
+		if not widths.is_empty():
+			bounds.append(Vector2(widths[-1][0], widths[-1][1]))
+	return {"points": out, "widths": bounds}

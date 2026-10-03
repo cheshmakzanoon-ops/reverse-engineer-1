@@ -44,7 +44,7 @@ func update_command(delta: float) -> void:
 	var curvature := 2.0 * offset.x / distance_sq
 	# PORT-SIDE lateral acceleration budget. Recovered thresholds do not prove
 	# the native speed planner, so these numbers are deliberately labelled.
-	_desired_speed = minf(22.0, sqrt(4.0 / maxf(absf(curvature), 0.002)))
+	_desired_speed = minf(18.0, sqrt(4.0 / maxf(absf(curvature), 0.002)))
 	var yaw_rate := kart.steering_rate(1.0) * kart.handling.rot_speed_factor(absf(kart.speed))
 	var steer := -curvature * maxf(absf(kart.speed), 6.0) / maxf(yaw_rate, 0.01)
 	if offset.z < 0.0:
@@ -93,6 +93,10 @@ func _find_segment(first: int, count: int) -> void:
 
 func _look_ahead_point() -> Vector3:
 	var remaining := float(_cfg.get("_lookAheadFixedDist", 20.0)) + absf(kart.speed) * float(_cfg.get("_lookAheadSpeedModifier", 0.32))
+	# Native steering has not been recovered. Its long look-ahead cuts across
+	# the narrow generated road with this different controller. Limit the
+	# horizon as an explicit PORT-SIDE safety policy, preserving source data.
+	remaining = minf(remaining, clampf(4.0 + absf(kart.speed) * 0.22, 4.0, 8.0))
 	var index := _cursor
 	var point := _line[index].lerp(_line[(index + 1) % _line.size()], _segment_fraction)
 	for step in _line.size():

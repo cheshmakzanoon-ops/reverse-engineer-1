@@ -71,7 +71,7 @@ jobs:
             name="$(basename "$test" .gd)"
             python3 scripts/checked_process.py --timeout 180 --require 'PASS:' \
               --log "verification/$name.log" -- \
-              godot --headless --path port --script "res://tests/$name.gd"
+              godot --headless --fixed-fps 60 --path port --script "res://tests/$name.gd"
           done
 
       - name: Preserve logs and exact reproduction inputs

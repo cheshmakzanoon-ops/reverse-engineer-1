@@ -26,6 +26,8 @@ var _ais: Array[KartAI] = []
 var _centreline: PackedVector3Array = PackedVector3Array()
 var _kart_body: Node3D
 var player_driver: PlayerDriver
+# PORT-SIDE safety policy, not a recovered native respawn rule.
+var _off_course_seconds: Dictionary = {}
 
 
 func _ready() -> void:
@@ -38,8 +40,20 @@ func _ready() -> void:
 	_update_driving_state()
 
 
-func _physics_process(_delta: float) -> void:
+func _physics_process(delta: float) -> void:
 	_update_driving_state()
+	for kart in _karts:
+		if director.is_kart_finished(kart):
+			continue
+		var recovery := director.recovery_transform(kart)
+		# A falling kart must not remain alive below the map indefinitely.
+		if not kart.global_position.is_finite() or kart.global_position.y < recovery.origin.y - 10.0:
+			_recover_kart(kart)
+			continue
+		var distance := director.distance_from_expected_route(kart)
+		_off_course_seconds[kart] = float(_off_course_seconds.get(kart, 0.0)) + delta if distance > 15.0 else 0.0
+		if float(_off_course_seconds[kart]) >= 2.0:
+			_recover_kart(kart)
 
 
 func _update_driving_state() -> void:
@@ -47,7 +61,11 @@ func _update_driving_state() -> void:
 		return
 	var enabled := director.is_running and director.countdown <= 0.0
 	for kart in _karts:
-		kart.set_driving_enabled(enabled and not director.is_kart_finished(kart))
+		var finished := director.is_kart_finished(kart)
+		kart.set_driving_enabled(enabled and not finished)
+		# Finishers remain visible and grounded but no longer block the line.
+		kart.collision_layer = 0 if finished else 2
+		kart.collision_mask = 1 if finished else 3
 	if touch != null:
 		touch.set_enabled(enabled and not director.is_kart_finished(player))
 
@@ -97,13 +115,14 @@ func _build_course() -> void:
 	var loops := false
 	if not track.is_empty() and (track["routes"] as Array).size() > 0:
 		loops = bool(track["routes"][0]["loop"])
-	_centreline = builder.sample_along(builder._resample(knots, loops), 8.0)
+	var sampled := builder.sample_course(builder._resample(knots, loops), builder._widths_at(knots, loops), 8.0, loops)
+	_centreline = sampled["points"]
 
 	director = RaceDirector.new()
 	director.name = "RaceDirector"
 	add_child(director)
 	director.setup(track_id, laps)
-	director.build_course(_centreline, 10.0)
+	director.build_course(_centreline, 10.0, sampled["widths"])
 
 	pickups = PickupSpawner.new()
 	pickups.name = "Pickups"
@@ -129,8 +148,11 @@ func _build_field() -> void:
 		var kart := _spawn_kart(is_player, origin, i, handling if is_player else ai_profile)
 		_karts.append(kart)
 		director.register_kart(kart)
+		kart.respawn_requested.connect(_recover_kart)
+		kart.respawned.connect(director.reset_motion)
 		if is_player:
 			player = kart
+			director.watched_kart = player
 			player_driver = PlayerDriver.new()
 			player_driver.kart = kart
 			kart.add_child(player_driver)
@@ -153,6 +175,8 @@ func _spawn_kart(is_player: bool, origin: Vector3, index: int, profile: KartPhys
 	var kart := Kart.new()
 	kart.name = "Kart%d" % index
 	kart.handling = profile
+	kart.collision_layer = 2
+	kart.collision_mask = 3
 
 	var cs := CollisionShape3D.new()
 	var capsule := CapsuleShape3D.new()
@@ -275,3 +299,10 @@ func _on_pickup(kart: Node3D, usable_id: String, effect: int) -> void:
 			# definitions but have no port logic yet. Collected so the box
 			# disappears and respawns on its recovered timer.
 			pass
+
+
+func _recover_kart(kart: Kart) -> void:
+	_off_course_seconds[kart] = 0.0
+	kart.respawn_at(director.recovery_transform(kart))
+	if kart.driver is KartAI:
+		kart.driver._reanchor()

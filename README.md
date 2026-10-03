@@ -11,12 +11,13 @@ original source-code recovery, emulator, or wrapper around the macOS binary.
 | Recovered definitions | 814 ScriptableObjects represented in the committed data; generated GDScript validated by tests |
 | Track structure | 16 decoded maps, including 12 race routes; generated roads are not imported original track art |
 | Kart/input | Per-kart commands, isolated AI/player input, selected profiles, forward grid heading, HUD binding, touch cancellation and reset state have runtime regressions |
-| Test baseline | 220 Godot checks and 13 Python tests pass in the input increment; import and 360-frame headless boot pass |
-| Full race correctness | Not established: proximity-based gates, counter-editing legacy integration tests, unwired pickup collisions and incomplete results/menu flow remain blockers |
-| Android | Historical prototype export exists in development history; this input revision is not yet Android-built, emulator-tested or physical-device-tested |
+| Test baseline | 248 Godot checks and 13 Python tests pass in the race increment; import and 360-frame headless boot pass |
+| Full race correctness | Six karts physically complete three Arlen Speedway laps through 188 ordered gates; pickup collisions, inventory and menu flow remain incomplete |
+| Android | Historical prototype export exists in development history; this race revision is not yet Android-built, emulator-tested or physical-device-tested |
 | Original art and audio | Not integrated; placeholder geometry and silence are not an acceptable completed vertical slice |
 
-[Input increment evidence and commands](docs/status/2026-10-03-input.md) and
+[Race increment evidence and commands](docs/status/2026-10-03-race.md),
+[input evidence](docs/status/2026-10-03-input.md) and
 [the preceding audit](docs/status/2026-10-03-audit.md) supersede historical
 completion claims in older documentation. A green parser, scene boot or APK
 export is not evidence of a complete playable race.
@@ -46,7 +47,7 @@ for test in port/tests/test_*.gd; do
   name="$(basename "$test" .gd)"
   python3 scripts/checked_process.py --timeout 180 --require 'PASS:' \
     --log "verification/$name.log" -- \
-    godot --headless --path port --script "res://tests/$name.gd"
+    godot --headless --fixed-fps 60 --path port --script "res://tests/$name.gd"
 done
 ```
 
