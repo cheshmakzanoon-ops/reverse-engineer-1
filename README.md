@@ -1,151 +1,61 @@
 # reverse-engineer-1
 
-Reverse-engineering a macOS game from its `.dmg` and re-implementing it in
-**Godot 4** for **Android**.
+An **incomplete Godot 4 / Android reconstruction** of the legally obtained
+macOS Warped Kart Racers v2.02 build. This is not a complete Android game,
+original source-code recovery, emulator, or wrapper around the macOS binary.
 
-```
-macOS .dmg ──► extract ──► Mach-O / asset analysis ──► Godot 4 ──► Android APK
-```
+## Verified status — 2026-10-03
 
-## Current status
-
-Target is **Warped Kart Racers v2.02** (`games/`), a Unity 2021.3 IL2CPP build.
-
-| Stage | State |
+| Layer | Evidence / limitation |
 |---|---|
-| DMG extracted, bundle characterized | done |
-| IL2CPP metadata recovered (`dump.cs`, 101 stub DLLs, 12,405 types) | done |
-| C# source tree generated — 8,038 files / 866,535 lines | done |
-| Kart handling model recovered (93 tuning fields, exact offsets) | done |
-| Real tuning values extracted from the game's ScriptableObjects | done — 78 scalars + 5 curves |
-| Core kart physics decompiled in Ghidra with real C# names | done (22 methods) |
-| Godot 4 port + signed Android APK | done — `port/`, 58 MB, arm64-v8a + x86_64 |
-| All 814 ScriptableObjects extracted into a validated GDScript database | done |
-| All 16 map scenes decoded; 12 race tracks build into drivable geometry | done |
-| All 6 handling profiles wired, incl. per-surface grip modifiers | done |
-| Race loop: laps, checkpoints, positions, pickups, AI, HUD, touch controls | done |
-| Art and audio assets | **not done** |
+| Recovered definitions | 814 ScriptableObjects represented in the committed data; generated GDScript validated by tests |
+| Track structure | 16 decoded maps, including 12 race routes; generated roads are not imported original track art |
+| Kart/input | Per-kart commands, isolated AI/player input, selected profiles, forward grid heading, HUD binding, touch cancellation and reset state have runtime regressions |
+| Test baseline | 220 Godot checks and 13 Python tests pass in the input increment; import and 360-frame headless boot pass |
+| Full race correctness | Not established: proximity-based gates, counter-editing legacy integration tests, unwired pickup collisions and incomplete results/menu flow remain blockers |
+| Android | Historical prototype export exists in development history; this input revision is not yet Android-built, emulator-tested or physical-device-tested |
+| Original art and audio | Not integrated; placeholder geometry and silence are not an acceptable completed vertical slice |
 
-### What "recovered source" means here
+[Input increment evidence and commands](docs/status/2026-10-03-input.md) and
+[the preceding audit](docs/status/2026-10-03-audit.md) supersede historical
+completion claims in older documentation. A green parser, scene boot or APK
+export is not evidence of a complete playable race.
 
-IL2CPP ships no C# — every method is compiled to ARM64 in `GameAssembly.dylib`.
-What exists is the game's *API surface*, rebuilt as real `.cs` files:
+## What recovery means
 
-```bash
-bash tools/il2cpp_to_csharp.sh          # DummyDll -> work/analysis/csharp
-```
+Unity IL2CPP metadata yields class/field layouts, signatures and attributes;
+recovered stub method bodies are not the original C# implementations. Targeted
+native analysis and recovered tuning guide the GDScript reconstruction.
+Port-side algorithms and approximations must be labelled explicitly.
 
-That gives every class, inheritance chain, field name and offset, method
-signature, enum and attribute — **including the developers' own `[Tooltip]` and
-`[Header]` comments**. Method *bodies* are empty; those need Ghidra, and only
-65 of 13,592 game methods have been decompiled.
+Recovered JSON: `work/assets/definitions/definitions.json` and
+`work/assets/tracks.json`. Generated data: `port/scripts/data/`. Never edit
+those generated modules to invent recovered values. Original DMG content is
+tracked through Git LFS; do not overwrite it or commit generated intermediates.
 
-So this is a complete specification rather than compilable source. That is the
-right artifact for a port: rewrite bodies in GDScript from the signature, the
-recovered data values, and targeted decompilation of the algorithms you need.
+## Development and validation
 
-**Structure, tuning values, and content are all recovered.** The remaining
-port-side numbers (`steer_speed`, `gliding_speed`, `top_speed`,
-`top_acceleration`) are marked `# PORT-SIDE`: the original either folds them
-into native code or never serializes them.
+Work on the single `main` branch. Add meaningful behavioral regressions for
+each increment and distinguish implemented, approximated, runtime-tested,
+Android-built, emulator-tested and physical-device-tested states.
 
-The game's content came out with it. `tools/dump_definitions.py` recovers all
-**814 ScriptableObjects** across 55 classes — 25 karts, 48 characters, 26 maps,
-7 boosts, 21 weighted pickup tables, 31 AI profiles, the league and campaign
-trees — and `tools/extract_assets.py` + `tools/build_tracks.py` decode all 16
-map scenes into each track's racing line, per-point road widths, pickup spots,
-respawn locations and surface tags. That is a playable race, not a test scene.
-
-```bash
-# prove the recovered data survived the trip into Godot
-cd port
-for t in test_recovered_tuning test_game_db test_all_tracks test_race_integration; do
-  godot --headless --path . --script "res://tests/$t.gd"
+```sh
+python3 -m unittest discover -s tests -v
+godot --headless --path port --import
+for test in port/tests/test_*.gd; do
+  name="$(basename "$test" .gd)"
+  python3 scripts/checked_process.py --timeout 180 --require 'PASS:' \
+    --log "verification/$name.log" -- \
+    godot --headless --path port --script "res://tests/$name.gd"
 done
-# 40 + 73 + 52 + 19 checks, all passing
 ```
 
-Full write-up, including every recovered name and offset and an honest
-limitations list: **[docs/RE-FINDINGS.md](docs/RE-FINDINGS.md)**.
-Port specifics and build commands: **[port/README.md](port/README.md)**.
+The checked runner rejects silent Godot errors even when the engine exits zero.
+CI retains exact source/engine inputs and test logs as short-lived artifacts;
+no DMG, extracted media or signing credentials belong in those artifacts.
 
-## ⚠️ Prerequisites
-
-**This toolchain is required. Any development environment used for this project
-must have it fully installed and verified before any analysis work begins** — a
-partial install fails late and confusingly (a missing Android SDK only surfaces
-after hours of porting).
-
-```bash
-bash scripts/install-re-tools.sh    # idempotent; needs root/sudo, ~12 GB disk
-bash scripts/verify-re-tools.sh     # must report 0 failed
-bash scripts/check-disk.sh          # free space + what can be reclaimed
-```
-
-`verify-re-tools.sh` does more than check binaries exist: it runs a real headless
-Ghidra decompilation **and** a real Godot → Android APK export, asserting on the
-produced artifacts.
-
-Full documentation, workflow, and troubleshooting:
-**[docs/RE-SETUP.md](docs/RE-SETUP.md)**
-
-## What you get
-
-- **Ghidra 12** + JDK 21 — decompilation (`analyzeHeadless` and GUI)
-- **rizin**, LLVM binutils, LIEF, macholib, capstone, z3 — binary analysis
-- **dmg2img**, `hpmount`, `bsdtar`, `7z` — DMG/HFS+/pkg extraction
-- **.NET SDK** + **Mono** — AssetRipper, Il2CppDumper, ILSpy for Unity/.NET games
-- **Godot 4.7** + export templates — the port target
-- **Android SDK**, NDK, build-tools, CMake, debug keystore — APK export
-
-## Quick start
-
-```bash
-# 1. Extract
-dmg2img game.dmg game.img && mkdir mnt && hpmount game.img mnt
-
-# Modern (LZFSE) DMGs: dmg2img 1.6.7 cannot decode them and still exits 0.
-# Use tools/udif_extract.py instead — see docs/RE-SETUP.md.
-
-# 2. Identify the engine — do this before anything else
-strings mnt/'Game.app'/Contents/MacOS/Game | grep -iE 'unity|unreal|godot|monogame'
-
-# 3. Decompile
-/opt/ghidra/support/analyzeHeadless /tmp/ghidra-proj gameproj \
-  -import mnt/'Game.app'/Contents/MacOS/Game \
-  -scriptPath tools/ghidra-scripts \
-  -postScript DecompileAll.java /tmp/game.c nolibs
-
-# 4. Port and export
-godot --headless --path ~/work/port --import
-godot --headless --path ~/work/port --export-debug "Android" build/game.apk
-```
-
-Note that `analyzeHeadless` exits `0` even when the post-script fails to compile —
-check the log for `ERROR` and confirm the output file is non-empty.
-
-## Layout
-
-```
-docs/RE-SETUP.md                 toolchain docs, workflow, troubleshooting
-scripts/install-re-tools.sh      idempotent toolchain installer
-scripts/verify-re-tools.sh       smoke test incl. live decompile + APK export
-scripts/check-disk.sh            free-space guard; non-zero when too tight
-tools/udif_extract.py            UDIF/DMG → raw image; handles LZFSE DMGs
-tools/ghidra-scripts/
-  DecompileAll.java              headless post-script: decompile all functions
-  DecompileIl2Cpp.java           decompile only game assemblies, with IL2CPP names
-tools/macho_slice.py             carve one arch out of a universal (fat) Mach-O
-tools/il2cpp_triage.py           query dump.cs: summary/ns/asm/type/find
-tools/unity_defs_to_gdscript.py  recover ScriptableObject values from a bundle
-tools/dump_definitions.py        dump every ScriptableObject to JSON, refs resolved
-tools/game_defs_to_gdscript.py   compile those definitions into GDScript data
-tools/extract_assets.py          scenes, meshes and textures out of AssetBundles
-tools/build_tracks.py            resolve map scenes into track definitions
-tools/tracks_to_gdscript.py      compile track definitions into GDScript
-tools/il2cpp_to_csharp.sh       rebuild the C# source tree from the stub DLLs
-port/                            Godot 4 project + Android export preset
-```
-
-Decompiled output, rizin projects, extracted bundles and APKs are build artifacts
-and are gitignored — regenerate them rather than committing them.
+Toolchain setup and actual smoke tests: [docs/RE-SETUP.md](docs/RE-SETUP.md).
+Recovery findings: [docs/RE-FINDINGS.md](docs/RE-FINDINGS.md).
+Historical port details: [port/README.md](port/README.md).
+Only distribute original game content when authorized; technical reconstruction
+and public-release licensing/signing are separate gates.

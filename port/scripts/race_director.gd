@@ -116,7 +116,6 @@ func register_kart(kart: Node3D) -> void:
 func start() -> void:
 	is_running = true
 	countdown = 3.0
-	countdown_finished.emit()
 
 
 func _process(delta: float) -> void:

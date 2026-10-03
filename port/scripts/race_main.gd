@@ -1,15 +1,6 @@
-## The playable race.
-##
-## Everything this scene builds comes out of the recovered game data:
-##   - the track shape, road widths and start position from the recovered map
-##     scenes (data/tracks.gd)
-##   - the physics tuning from the recovered KartPhysicsHandling profiles
-##     (data/handling.gd), selected per game mode
-##   - the pickup boxes and their weighted contents from the recovered
-##     PickupBox/PickupTable definitions
-##   - the AI behaviour from the recovered RaceKartAIDefinition
-##
-## Only the materials are placeholders: no art or audio has been wired in yet.
+## Engineering race scene built from recovered route and tuning data.
+## Kart meshes/materials are placeholders, audio is absent, and AI control is
+## PORT-SIDE rather than recovered native behavior. See docs/status/.
 
 extends Node3D
 
@@ -18,8 +9,8 @@ const Profile := preload("res://scripts/handling_profile.gd")
 const GameDB := preload("res://scripts/data/game_db.gd")
 
 ## Track to race. Ids come from the recovered map bundles -- see `Tracks.IDS`.
-@export var track_id: String = "map_race_racearlenspeedway"
-## "race", "battle" or "150"; picks the recovered handling profile.
+@export var track_id: String = "map_racearlenspeedway"
+## "race", "battle" or "race150"; picks the recovered handling profile.
 @export var mode: String = "race"
 @export var field_size: int = 6
 @export var laps: int = 0
@@ -34,6 +25,7 @@ var _karts: Array[Kart] = []
 var _ais: Array[KartAI] = []
 var _centreline: PackedVector3Array = PackedVector3Array()
 var _kart_body: Node3D
+var player_driver: PlayerDriver
 
 
 func _ready() -> void:
@@ -43,6 +35,21 @@ func _ready() -> void:
 	_build_field()
 	_build_ui()
 	director.start()
+	_update_driving_state()
+
+
+func _physics_process(_delta: float) -> void:
+	_update_driving_state()
+
+
+func _update_driving_state() -> void:
+	if director == null:
+		return
+	var enabled := director.is_running and director.countdown <= 0.0
+	for kart in _karts:
+		kart.set_driving_enabled(enabled and not director.is_kart_finished(kart))
+	if touch != null:
+		touch.set_enabled(enabled and not director.is_kart_finished(player))
 
 
 func _first_race_track() -> String:
@@ -119,17 +126,21 @@ func _build_field() -> void:
 
 	for i in field_size:
 		var is_player := i == 0
-		var kart := _spawn_kart(is_player, origin, i)
+		var kart := _spawn_kart(is_player, origin, i, handling if is_player else ai_profile)
 		_karts.append(kart)
 		director.register_kart(kart)
 		if is_player:
 			player = kart
+			player_driver = PlayerDriver.new()
+			player_driver.kart = kart
+			kart.add_child(player_driver)
+			kart.driver = player_driver
 		else:
 			# Each AI drives the recovered AI handling profile, not the player's.
-			kart.handling = ai_profile
 			var ai := KartAI.new()
 			kart.add_child(ai)
 			ai.kart = kart
+			kart.driver = ai
 			ai.configure(_pick_ai_definition())
 			ai.set_line(_centreline)
 			ai.respawn_points = Tracks.respawn_locations(track_id)
@@ -138,10 +149,10 @@ func _build_field() -> void:
 
 ## Grid placement: staggered rows behind the start line, so karts are not
 ## spawning inside each other on the first frame.
-func _spawn_kart(is_player: bool, origin: Vector3, index: int) -> Kart:
+func _spawn_kart(is_player: bool, origin: Vector3, index: int, profile: KartPhysicsHandling) -> Kart:
 	var kart := Kart.new()
 	kart.name = "Kart%d" % index
-	_kart_body.add_child(kart)
+	kart.handling = profile
 
 	var cs := CollisionShape3D.new()
 	var capsule := CapsuleShape3D.new()
@@ -151,7 +162,7 @@ func _spawn_kart(is_player: bool, origin: Vector3, index: int) -> Kart:
 	cs.position = Vector3(0, 1.2, 0)
 	kart.add_child(cs)
 
-	var body := StaticBody3D.new()
+	var body := Node3D.new()
 	kart.add_child(body)
 	var mi := MeshInstance3D.new()
 	var box := BoxMesh.new()
@@ -167,7 +178,7 @@ func _spawn_kart(is_player: bool, origin: Vector3, index: int) -> Kart:
 	# Park on the grid, facing along the recovered racing line.
 	var slot := index
 	var lane := slot % 2
-	var row := slot / 2
+	var row := floori(float(slot) / 2.0)
 	var along: Vector3 = _centreline[0] if _centreline.size() > 0 else origin
 	var next: Vector3 = _centreline[1] if _centreline.size() > 1 else along + Vector3.FORWARD
 	var fwd := (next - along)
@@ -176,15 +187,17 @@ func _spawn_kart(is_player: bool, origin: Vector3, index: int) -> Kart:
 		fwd = Vector3.FORWARD
 	fwd = fwd.normalized()
 	var right := fwd.cross(Vector3.UP).normalized()
-	kart.global_position = along + right * (float(lane) * 3.0 - 1.5) - fwd * (float(row) * 4.0)
-	kart.global_position.y += 1.4
-	kart.look_at(kart.global_position + fwd, Vector3.UP)
+	kart.position = along + right * (float(lane) * 3.0 - 1.5) - fwd * (float(row) * 4.0 + 3.0)
+	kart.position.y += 0.15
+	kart.basis = Basis.looking_at(fwd, Vector3.UP, true)
+	# Placement and handling must exist before _ready captures recovery state.
+	_kart_body.add_child(kart)
 
-	var cam := Camera3D.new()
-	cam.fov = Tracks.camera_fov(track_id)
-	cam.far = 900.0
-	kart.add_child(cam)
 	if is_player:
+		var cam := Camera3D.new()
+		cam.fov = Tracks.camera_fov(track_id)
+		cam.far = 900.0
+		kart.add_child(cam)
 		kart.chase_camera = cam
 		cam.current = true
 	return kart
@@ -202,7 +215,10 @@ func _spawn_kart(is_player: bool, origin: Vector3, index: int) -> Kart:
 
 func _pick_ai_definition() -> String:
 	var ids := _ai_definition_ids()
-	var want := "RaceKartAIDefinition%s_%dAI" % [difficulty, field_size]
+	var number_names := {1: "One", 2: "Two", 3: "Three", 4: "Four", 5: "Five", 9: "Nine"}
+	var ai_count := field_size - 1
+	var suffix: String = number_names.get(ai_count, "Nine")
+	var want := "RaceKartAIDefinition%s_%sAI" % [difficulty, suffix]
 	if ids.has(want):
 		return want
 	# Same difficulty, any field size.
@@ -214,7 +230,7 @@ func _pick_ai_definition() -> String:
 			return id
 	# Any profile for this field size.
 	for id in ids:
-		if id.ends_with("_%dAI" % field_size):
+		if id.ends_with("_%sAI" % suffix):
 			return id
 	return "RaceKartAIDefinitionHard_NineAI"
 
@@ -239,6 +255,8 @@ func _build_ui() -> void:
 	touch.name = "TouchControls"
 	layer.add_child(touch)
 	touch.visible = OS.has_feature("mobile")
+	player_driver.touch = touch
+	hud.bind(director, player)
 
 
 func _on_pickup(kart: Node3D, usable_id: String, effect: int) -> void:

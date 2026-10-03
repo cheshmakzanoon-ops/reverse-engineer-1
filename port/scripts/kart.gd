@@ -26,6 +26,13 @@ extends CharacterBody3D
 @export var handling: KartPhysicsHandling
 @export var chase_camera: Camera3D
 
+signal respawn_requested(kart: Kart)
+signal respawned(kart: Kart)
+
+var command := KartCommand.new()
+var driver: Node
+var driving_enabled: bool = true
+
 var speed: float = 0.0
 var is_drifting: bool = false
 var is_boosting: bool = false
@@ -56,23 +63,52 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if not driving_enabled:
+		command.clear()
+		velocity.x = 0.0
+		velocity.z = 0.0
+		_apply_gravity(delta)
+		move_and_slide()
+		_update_speed()
+		_update_camera(delta)
+		return
+	if is_instance_valid(driver):
+		driver.update_command(delta)
 	_read_input()
 	_tick_timers(delta)
 	_update_speed()
 	_apply_acceleration(delta)
 	_apply_steering(delta)
 	_update_drift(delta)
-	move_and_slide()
 	_apply_gravity(delta)
+	move_and_slide()
 	_align_to_ground(delta)
+	_update_speed()
 	_update_camera(delta)
 
 
 func _read_input() -> void:
-	_steer_input = Input.get_axis("steer_left", "steer_right")
-	_throttle = Input.get_action_strength("accelerate") - Input.get_action_strength("brake")
-	if Input.is_action_just_pressed("reset_kart"):
-		_respawn()
+	_steer_input = command.steer
+	_throttle = command.throttle
+	if command.consume_reset():
+		request_respawn()
+
+
+func set_driving_enabled(value: bool) -> void:
+	if driving_enabled == value:
+		return
+	driving_enabled = value
+	if not value:
+		command.clear()
+		velocity = Vector3.ZERO
+		_release_drift(false)
+
+
+func request_respawn() -> void:
+	if respawn_requested.has_connections():
+		respawn_requested.emit(self)
+	else:
+		respawn()
 
 
 func _tick_timers(delta: float) -> void:
@@ -93,7 +129,8 @@ func _apply_acceleration(delta: float) -> void:
 	var forward := global_transform.basis.z
 	var applied := 0.0
 
-	if _throttle > 0.0 and speed < handling.speed_hard_cap:
+	var cap := handling.speed_hard_cap + (handling.boost_speed_offset if is_boosting else 0.0)
+	if _throttle > 0.0 and speed < cap:
 		# `_forwardAccelCurve` maps absolute speed -> engine force, and falls
 		# away toward the cap: (0,17.5) (8,13.5) (20,9.34) (30,3.2).
 		var force := handling.forward_accel_force(speed)
@@ -103,11 +140,11 @@ func _apply_acceleration(delta: float) -> void:
 			force *= 1.0 + handling.boost
 		applied = force * _throttle
 		if speed < 0.0:
-			applied = -applied * 0.5   # braking out of a reverse
-	elif _throttle < 0.0 and speed > -handling.speed_hard_cap * 0.4:
-		applied = -handling.braking * absf(_throttle)
-		if speed < 0.0:
-			applied = -applied
+			applied = handling.braking * _throttle   # oppose reverse velocity
+	elif _throttle < 0.0:
+		# Use the recovered reverse curve once forward motion has been braked.
+		var force := handling.braking if speed > 0.0 else maxf(handling.reverse_accel_curve.sample(absf(speed)), 0.0)
+		applied = -force * absf(_throttle)
 
 	# Slope compensation (recovered +0x40..+0x4C): push into uphill, ease off
 	# downhill, so ramps read as ramps.
@@ -123,21 +160,18 @@ func _apply_acceleration(delta: float) -> void:
 	velocity += forward * applied * delta
 
 	# `_speedHardCap` (55 on default), extended by `_boostSpeedOffset` (10).
-	var cap := handling.speed_hard_cap + (handling.boost_speed_offset if is_boosting else 0.0)
 	var longitudinal := velocity.dot(forward)
 	if longitudinal > cap:
 		velocity -= forward * (longitudinal - cap)
 
 
 func _apply_steering(delta: float) -> void:
-	if lost_control or is_boosting:
-		# Recovered behaviour: boost and post-crash lockout suppress steering.
+	if lost_control:
+		# PORT-SIDE: boosts remain steerable; native steering parity is unproven.
 		return
 
 	var basis := global_transform.basis
 	var steer := _steer_input
-	if is_drifting:
-		steer = _drift_direction
 	if is_zero_approx(steer):
 		return
 
@@ -147,9 +181,9 @@ func _apply_steering(delta: float) -> void:
 	if is_drifting:
 		gain *= handling.rot_speed_drift_ratio   # recovered +0x74 (0.9)
 
-	var basis_rotated := Basis(Vector3.UP, gain * delta) * basis
-	basis_rotated = basis_rotated.orthonormalized()
-	velocity = basis_rotated * velocity
+	var turn := Basis(Vector3.UP, -gain * delta)
+	var basis_rotated := (turn * basis).orthonormalized()
+	velocity = turn * velocity
 	global_transform.basis = basis_rotated
 
 
@@ -168,7 +202,7 @@ func steering_rate(steer: float) -> float:
 
 
 func _update_drift(delta: float) -> void:
-	var want_drift := Input.is_action_pressed("handbrake") \
+	var want_drift := command.drift \
 		and absf(speed) >= handling.drift_speed_min \
 		and not is_zero_approx(_steer_input) \
 		and not lost_control
@@ -192,16 +226,22 @@ func _update_drift(delta: float) -> void:
 	velocity -= global_transform.basis.x * clampf(lateral, -limit, limit)
 	velocity *= 1.0 - 0.35 * delta
 
-	# Level up through `_driftBoostLevelsTable` as the meter fills.
-	for level in handling.drift_boost_levels:
-		if level.is_valid() and drift_elapsed >= level.time_to_activate:
-			trigger_boost(level.drift_boost_duration, level.drift_boost_ratio)
+	# Charge only. Paying out every tick made an unlimited boost generator.
 
 
-func _release_drift() -> void:
+func _release_drift(award_boost: bool = true) -> void:
+	var earned: DriftBoostLevel = null
+	if award_boost and is_drifting:
+		for level in handling.drift_boost_levels:
+			if level.is_valid() and drift_elapsed >= level.time_to_activate:
+				if earned == null or level.time_to_activate > earned.time_to_activate:
+					earned = level
 	is_drifting = false
 	drift_elapsed = 0.0
 	_drift_direction = 0.0
+	# PORT-SIDE payout timing until the native release method is recovered.
+	if earned != null:
+		trigger_boost(earned.drift_boost_duration, earned.drift_boost_ratio)
 
 
 func trigger_boost(duration: float, ratio: float = 1.0) -> void:
@@ -263,26 +303,27 @@ func respawn(respawn_points: Array = []) -> void:
 	var target := _start_transform
 	var best := INF
 	for entry in respawn_points:
-		var pos: Vector3 = entry.get("pos", Vector3.ZERO) if entry is Dictionary \
-			else Vector3(entry)
-		var d := pos.distance_to(global_position)
-		if d < best:
-			best = d
-			target = Transform3D(Basis(), pos)
+		var pos: Vector3 = entry.get("pos", Vector3.ZERO) if entry is Dictionary else Vector3(entry)
+		var distance := pos.distance_to(global_position)
+		if distance < best:
+			best = distance
+			var orientation: Basis = entry.get("basis", _start_transform.basis) if entry is Dictionary else _start_transform.basis
+			target = Transform3D(orientation.orthonormalized(), pos)
+	respawn_at(target)
+
+
+func respawn_at(target: Transform3D) -> void:
 	global_transform = target
 	velocity = Vector3.ZERO
+	speed = 0.0
 	lost_control = false
 	_lost_control_timer = 0.0
 	is_boosting = false
 	_boost_timer = 0.0
-	_release_drift()
+	_release_drift(false)
+	command.clear()
+	respawned.emit(self)
 
 
 func _respawn() -> void:
-	respawn()
-	global_transform = _start_transform
-	velocity = Vector3.ZERO
-	lost_control = false
-	_lost_control_timer = 0.0
-	is_boosting = false
-	_boost_timer = 0.0
+	request_respawn()

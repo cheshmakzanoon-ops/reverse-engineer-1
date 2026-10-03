@@ -1,207 +1,171 @@
-## On-screen controls for touch devices.
-##
-## The APK has to be playable on a phone, and keyboard/gamepad input alone is
-## not. These are real on-screen inputs rather than a scripted InputMap hack,
-## because the racing controls are analog-ish: a steering slider needs to report
-## a continuous value, and a jump-start into the steer axes gives a kart a
-## steering input it should never have had.
-##
-## Driving `Input.action_press`/`action_release` means everything downstream --
-## the kart, the AI, the HUD -- keeps reading the same actions as on desktop,
-## so there is exactly one input path to reason about.
-
+## Multi-touch controls with local state, exact visual/hit-test agreement and
+## no Input.action_press/action_release calls. Native touch/device latency is
+## a separate verification gate; synthetic event tests do not establish it.
 class_name TouchControls
 extends Control
 
-## Steering stick, bottom-left. Reports -1 (full left) .. 1 (full right).
 var steer: float = 0.0
 var throttle: float = 0.0
 var handbrake_held: bool = false
-
-## Only builds and accepts input once a touch has been seen, so a desktop run
-## does not show a stick nobody is using.
 var is_touch_active: bool = false
-
-const ACTION_STEER_LEFT := "steer_left"
-const ACTION_STEER_RIGHT := "steer_right"
-const ACTION_ACCELERATE := "accelerate"
-const ACTION_BRAKE := "brake"
-const ACTION_HANDBRAKE := "handbrake"
-
-const STICK_RADIUS := 96.0
-const KNOB_RADIUS := 46.0
-
+var enabled: bool = true
+var _fingers: Dictionary = {}
 var _stick_origin := Vector2.ZERO
 var _stick_pos := Vector2.ZERO
-var _stick_touch := -1
-var _brake_touch := -1
-var _throttle_touch := -1
-var _handbrake_touch := -1
-var _steer_left_pressed := false
-var _steer_right_pressed := false
-var _accel_pressed := false
-var _brake_pressed := false
-var _handbrake_pressed := false
+var _virtual := false
+var _reset_requested := false
+var _item_requested := false
 
+const PLACEMENT := {
+	"steer": Vector2(0.15, 0.77), "accelerate": Vector2(0.88, 0.78),
+	"brake": Vector2(0.88, 0.48), "drift": Vector2(0.72, 0.78),
+	"item": Vector2(0.72, 0.48), "reset": Vector2(0.55, 0.78),
+}
+const LABELS := {"accelerate": "GO", "brake": "BRAKE", "drift": "DRIFT", "item": "USE", "reset": "RESET"}
 
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	is_touch_active = OS.has_feature("mobile")
+	visible = is_touch_active
+	queue_redraw()
 
+func safe_rect() -> Rect2:
+	var rect := get_viewport_rect()
+	if OS.has_feature("android"):
+		var safe := Rect2(DisplayServer.get_display_safe_area())
+		if safe.has_area():
+			var local_safe: Rect2 = get_viewport().get_screen_transform().affine_inverse() * safe
+			rect = rect.intersection(local_safe)
+	return rect.grow(-16.0)
+
+func control_center(action: String) -> Vector2:
+	var rect := safe_rect()
+	return rect.position + rect.size * Vector2(PLACEMENT[action])
+
+func control_radius(action: String) -> float:
+	var scale := minf(safe_rect().size.x / 1280.0, safe_rect().size.y / 720.0)
+	return (96.0 if action == "steer" else (48.0 if action == "reset" else 68.0)) * scale
 
 func _input(event: InputEvent) -> void:
-	var touch := event as InputEventScreenTouch
-	if touch != null:
+	if not enabled or get_tree().paused:
+		return
+	var handled := false
+	if event is InputEventScreenTouch:
 		is_touch_active = true
 		visible = true
-		if touch.pressed:
-			_on_press(touch.index, touch.position)
+		if event.pressed and not event.canceled:
+			handled = _on_press(event.index, event.position)
 		else:
-			_on_release(touch.index)
+			handled = _fingers.has(event.index)
+			_on_release(event.index)
 	elif event is InputEventScreenDrag:
-		_on_drag((event as InputEventScreenDrag).index,
-				(event as InputEventScreenDrag).position)
+		handled = _fingers.has(event.index)
+		_on_drag(event.index, event.position)
+	if handled:
+		get_viewport().set_input_as_handled()
+	queue_redraw()
 
+func _on_press(index: int, pos: Vector2) -> bool:
+	if not enabled or _fingers.has(index):
+		return false
+	for action: String in PLACEMENT:
+		if pos.distance_to(control_center(action)) > control_radius(action):
+			continue
+		if _fingers.values().has(action):
+			return false
+		_virtual = false
+		_fingers[index] = action
+		if action == "steer":
+			_stick_origin = control_center("steer")
+			_on_drag(index, pos)
+		elif action == "reset":
+			_reset_requested = true
+		elif action == "item":
+			_item_requested = true
+		_sync_buttons()
+		queue_redraw()
+		return true
+	return false
 
-## Track the finger ourselves rather than polling `Input.get_touches()`, which
-## is unavailable on the desktop and web backends this project also builds for.
 func _on_drag(index: int, pos: Vector2) -> void:
-	if index == _stick_touch:
+	if _fingers.get(index, "") == "steer":
 		_stick_pos = pos
-
-
-func _on_press(index: int, pos: Vector2) -> void:
-	var size := get_viewport_rect().size
-	# Left third, lower half -> steering stick.
-	if pos.x < size.x * 0.42 and pos.y > size.y * 0.42 and _stick_touch < 0:
-		_stick_touch = index
-		# Placing the stick where the thumb lands, not at a fixed spot: on a
-		# phone the thumb rarely lands on a fixed control.
-		_stick_origin = pos
-		_stick_pos = pos
-		steer = 0.0
-		return
-	# Right third, upper part -> brake/reverse.
-	if pos.x > size.x * 0.58 and pos.y < size.y * 0.55 and _brake_touch < 0:
-		_brake_touch = index
-		_brake_pressed = true
-		Input.action_release(ACTION_ACCELERATE)
-		_accel_pressed = false
-		return
-	# Right third, lower part -> throttle.
-	if pos.x > size.x * 0.58 and pos.y >= size.y * 0.55 and _throttle_touch < 0:
-		_throttle_touch = index
-		_accel_pressed = true
-		Input.action_release(ACTION_BRAKE)
-		_brake_pressed = false
-		return
-	# Centre-right strip -> handbrake / drift.
-	if pos.x > size.x * 0.42 and pos.x <= size.x * 0.58 and _handbrake_touch < 0:
-		_handbrake_touch = index
-		_handbrake_pressed = true
-
+		steer = clampf((pos.x - _stick_origin.x) / maxf(control_radius("steer"), 1.0), -1.0, 1.0)
+		queue_redraw()
 
 func _on_release(index: int) -> void:
-	if index == _stick_touch:
-		_stick_touch = -1
+	if _fingers.get(index, "") == "steer":
 		steer = 0.0
-		_set_axis(ACTION_STEER_LEFT, false)
-		_set_axis(ACTION_STEER_RIGHT, false)
-	elif index == _throttle_touch:
-		_throttle_touch = -1
-		if _accel_pressed:
-			_accel_pressed = false
-			Input.action_release(ACTION_ACCELERATE)
-	elif index == _brake_touch:
-		_brake_touch = -1
-		if _brake_pressed:
-			_brake_pressed = false
-			Input.action_release(ACTION_BRAKE)
-	elif index == _handbrake_touch:
-		_handbrake_touch = -1
-		if _handbrake_pressed:
-			_handbrake_pressed = false
-			Input.action_release(ACTION_HANDBRAKE)
+	_fingers.erase(index)
+	_sync_buttons()
+	queue_redraw()
 
+func _sync_buttons() -> void:
+	var held := _fingers.values()
+	# Brake wins while both are held; releasing it restores the held throttle.
+	throttle = -1.0 if held.has("brake") else (1.0 if held.has("accelerate") else 0.0)
+	handbrake_held = held.has("drift")
 
-func _process(_delta: float) -> void:
-	if _stick_touch < 0:
+func has_active_input() -> bool:
+	return enabled and (_virtual or not _fingers.is_empty())
+
+func set_virtual(accelerator: float, steering: float, handbrake: bool = false) -> void:
+	if not enabled:
 		return
-	var delta := (_stick_pos - _stick_origin) / STICK_RADIUS
-	if delta.length() > 1.0:
-		delta = delta.normalized()
-	steer = delta.x
-	_set_axis(ACTION_STEER_LEFT, steer < -0.08)
-	_set_axis(ACTION_STEER_RIGHT, steer > 0.08)
-
-
-func _set_axis(action: String, pressed: bool) -> void:
-	if pressed:
-		if not Input.is_action_pressed(action):
-			Input.action_press(action)
-	elif Input.is_action_pressed(action):
-		Input.action_release(action)
-
-
-## Drive the same actions programmatically -- used by the replay/attract mode
-## and by the AI when it has to borrow the player's kart.
-func set_virtual(throttle_amount: float, steer_amount: float, handbrake := false) -> void:
-	throttle = throttle_amount
-	steer = steer_amount
+	_virtual = true
+	throttle = clampf(accelerator, -1.0, 1.0)
+	steer = clampf(steering, -1.0, 1.0)
 	handbrake_held = handbrake
-	_set_axis(ACTION_ACCELERATE, throttle_amount > 0.05)
-	_set_axis(ACTION_BRAKE, throttle_amount < -0.05)
-	_set_axis(ACTION_STEER_LEFT, steer_amount < -0.08)
-	_set_axis(ACTION_STEER_RIGHT, steer_amount > 0.08)
-	_set_axis(ACTION_HANDBRAKE, handbrake)
+	queue_redraw()
 
+func consume_reset() -> bool:
+	var requested := _reset_requested
+	_reset_requested = false
+	return requested
+
+func consume_item() -> bool:
+	var requested := _item_requested
+	_item_requested = false
+	return requested
+
+func set_enabled(value: bool) -> void:
+	enabled = value
+	if not value:
+		release_all()
+	queue_redraw()
 
 func release_all() -> void:
-	for a: String in [ACTION_ACCELERATE, ACTION_BRAKE, ACTION_STEER_LEFT,
-			ACTION_STEER_RIGHT, ACTION_HANDBRAKE]:
-		if Input.is_action_pressed(a):
-			Input.action_release(a)
+	_fingers.clear()
+	_virtual = false
 	steer = 0.0
 	throttle = 0.0
 	handbrake_held = false
-	_accel_pressed = false
-	_brake_pressed = false
-	_handbrake_pressed = false
-	_steer_left_pressed = false
-	_steer_right_pressed = false
+	_reset_requested = false
+	_item_requested = false
+	queue_redraw()
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_PAUSED:
+		release_all()
+	elif what == NOTIFICATION_RESIZED and is_inside_tree():
+		release_all()
+
+func _exit_tree() -> void:
+	release_all()
 
 func _draw() -> void:
-	if not is_touch_active or not visible:
+	if not is_touch_active or not enabled:
 		return
-	var size := get_viewport_rect().size
-	# Steering stick.
-	draw_arc(_stick_origin, STICK_RADIUS, 0.0, TAU, 48,
-			Color(1, 1, 1, 0.22), 4.0)
-	draw_circle(_stick_origin + Vector2(steer * STICK_RADIUS, 0), KNOB_RADIUS,
-			Color(1, 1, 1, 0.35))
-	# Throttle / brake pads.
-	_pads(size)
-
-
-func _pads(size: Vector2) -> void:
-	var dim := Color(1, 1, 1, 0.18)
-	var lit := Color(0.55, 0.95, 0.55, 0.45)
-	var r := 76.0
-	_pad(Vector2(size.x * 0.80, size.y * 0.76), r,
-			"GO" if not _accel_pressed else "", _accel_pressed, lit, dim)
-	_pad(Vector2(size.x * 0.93, size.y * 0.40), r,
-			"BRK" if not _brake_pressed else "", _brake_pressed, lit, dim)
-	_pad(Vector2(size.x * 0.63, size.y * 0.34), 52.0,
-			"DRIFT" if not _handbrake_pressed else "", _handbrake_pressed, lit, dim)
-
-
-func _pad(centre: Vector2, radius: float, label: String, on: bool,
-		lit: Color, dim: Color) -> void:
-	draw_circle(centre, radius, lit if on else dim)
-	if label != "":
+	var center := control_center("steer")
+	var radius := control_radius("steer")
+	draw_arc(center, radius, 0.0, TAU, 48, Color(1, 1, 1, 0.4), 3.0)
+	draw_circle(center + Vector2(steer * radius, 0), radius * 0.4, Color(1, 1, 1, 0.5))
+	for action: String in LABELS:
+		var held := _fingers.values().has(action)
+		center = control_center(action)
+		draw_circle(center, control_radius(action), Color(0.35, 0.8, 0.5, 0.65) if held else Color(0.1, 0.15, 0.2, 0.6))
+		var text: String = LABELS[action]
 		var font := ThemeDB.fallback_font
-		var size_px := font.get_string_size(label,
-				HORIZONTAL_ALIGNMENT_CENTER, -1, 22)
-		draw_string(font, centre + Vector2(-size_px.x * 0.5, 8), label,
-				HORIZONTAL_ALIGNMENT_CENTER, -1, 22, Color(1, 1, 1, 0.7))
+		var extent := font.get_string_size(text, HORIZONTAL_ALIGNMENT_CENTER, -1, 20)
+		draw_string(font, center + Vector2(-extent.x * 0.5, 7), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color.WHITE)
