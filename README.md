@@ -7,6 +7,35 @@ Reverse-engineering a macOS game from its `.dmg` and re-implementing it in
 macOS .dmg ──► extract ──► Mach-O / asset analysis ──► Godot 4 ──► Android APK
 ```
 
+## Current status
+
+Target is **Warped Kart Racers v2.02** (`games/`), a Unity 2021.3 IL2CPP build.
+
+| Stage | State |
+|---|---|
+| DMG extracted, bundle characterized | done |
+| IL2CPP metadata recovered (`dump.cs`, 101 stub DLLs, 12,405 types) | done |
+| Kart handling model recovered (93 tuning fields, exact offsets) | done |
+| Real tuning values extracted from the game's ScriptableObjects | done — 78 scalars + 5 curves |
+| Core kart physics decompiled in Ghidra with real C# names | done (22 methods) |
+| Godot 4 port + signed Android APK | done — `port/`, 55 MB, arm64-v8a + x86_64 |
+| Art/audio assets, touch controls, other 5 handling profiles | **not done** |
+
+**Structure and the primary tuning values are both recovered.** The remaining
+port-side numbers (`steer_speed`, `gliding_speed`, `top_speed`,
+`top_acceleration`) are marked `# PORT-SIDE`: the original either folds them
+into native code or never serializes them.
+
+```bash
+# prove the recovered values survived the trip into Godot
+cd port && godot --headless --path . --script res://tests/test_recovered_tuning.gd
+# PASS: 34 checks
+```
+
+Full write-up, including every recovered name and offset and an honest
+limitations list: **[docs/RE-FINDINGS.md](docs/RE-FINDINGS.md)**.
+Port specifics and build commands: **[port/README.md](port/README.md)**.
+
 ## ⚠️ Prerequisites
 
 **This toolchain is required. Any development environment used for this project
@@ -72,6 +101,11 @@ scripts/check-disk.sh            free-space guard; non-zero when too tight
 tools/udif_extract.py            UDIF/DMG → raw image; handles LZFSE DMGs
 tools/ghidra-scripts/
   DecompileAll.java              headless post-script: decompile all functions
+  DecompileIl2Cpp.java           decompile only game assemblies, with IL2CPP names
+tools/macho_slice.py             carve one arch out of a universal (fat) Mach-O
+tools/il2cpp_triage.py           query dump.cs: summary/ns/asm/type/find
+tools/unity_defs_to_gdscript.py  recover ScriptableObject values from a bundle
+port/                            Godot 4 project + Android export preset
 ```
 
 Decompiled output, rizin projects, extracted bundles and APKs are build artifacts
