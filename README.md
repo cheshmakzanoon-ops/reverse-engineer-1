@@ -17,6 +17,7 @@ after hours of porting).
 ```bash
 bash scripts/install-re-tools.sh    # idempotent; needs root/sudo, ~12 GB disk
 bash scripts/verify-re-tools.sh     # must report 0 failed
+bash scripts/check-disk.sh          # free space + what can be reclaimed
 ```
 
 `verify-re-tools.sh` does more than check binaries exist: it runs a real headless
@@ -67,6 +68,7 @@ check the log for `ERROR` and confirm the output file is non-empty.
 docs/RE-SETUP.md                 toolchain docs, workflow, troubleshooting
 scripts/install-re-tools.sh      idempotent toolchain installer
 scripts/verify-re-tools.sh       smoke test incl. live decompile + APK export
+scripts/check-disk.sh            free-space guard; non-zero when too tight
 tools/udif_extract.py            UDIF/DMG → raw image; handles LZFSE DMGs
 tools/ghidra-scripts/
   DecompileAll.java              headless post-script: decompile all functions

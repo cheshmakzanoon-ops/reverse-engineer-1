@@ -49,7 +49,20 @@ The pipeline has four hard dependencies that are easy to miss:
 ```bash
 bash scripts/install-re-tools.sh    # needs root/sudo; idempotent
 bash scripts/verify-re-tools.sh     # must report 0 failed
+bash scripts/check-disk.sh          # free space + what can be reclaimed
 ```
+
+> **`verify-re-tools.sh` fails by design if you removed Godot/Android.** The
+> Godot editor, export templates and Android SDK total ~5 GB. If they are not
+> installed yet, drop them to make room and expect the *Godot 4* and *Android
+> SDK* sections to report `FAIL` and the export test to `SKIP`. That is the
+> expected state, not a broken toolchain — the RE sections, including the
+> end-to-end Ghidra decompilation, still have to pass. Restore with
+> `bash scripts/install-re-tools.sh` when you actually need to build an APK.
+>
+> `check-disk.sh` exits non-zero below a threshold (default 5 GB, or pass a
+> number) and lists what can be reclaimed, so you can gate a long step up
+> front instead of discovering the disk is full halfway through Ghidra.
 
 ---
 
@@ -289,6 +302,7 @@ particular has bumped its JDK requirement across major versions.
 docs/RE-SETUP.md                 this file
 scripts/install-re-tools.sh      idempotent toolchain installer
 scripts/verify-re-tools.sh       smoke test: decompilation + real Android export
+scripts/check-disk.sh            free-space guard; non-zero when too tight
 tools/udif_extract.py            UDIF/DMG → raw image; handles LZFSE DMGs
 tools/ghidra-scripts/
   DecompileAll.java              headless post-script: decompile all functions
