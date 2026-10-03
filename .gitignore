@@ -1,0 +1,39 @@
+# Reverse-engineering build artifacts — regenerate, don't commit.
+
+# Ghidra headless project directories and decompiler output
+*.gpr
+*.rep/
+/ghidra-proj/
+decompiled*.c
+*.decompiled.c
+strings-out/
+functions.txt
+
+# rizin / radare2 analysis state
+*.rzdb
+*.rzbak
+rz-project/
+.rz/
+
+# binwalk / firmware extraction output
+_binwalk/
+*_extracted/
+*.squashfs
+*.jffs2*
+*.ubifs*
+
+# Captures and scratch
+*.pcap
+*.pcapng
+/scratch/
+/tmp/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# OS noise
+.DS_Store
+Thumbs.db
