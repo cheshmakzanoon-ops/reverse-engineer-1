@@ -41,6 +41,9 @@ Full documentation, workflow, and troubleshooting:
 # 1. Extract
 dmg2img game.dmg game.img && mkdir mnt && hpmount game.img mnt
 
+# Modern (LZFSE) DMGs: dmg2img 1.6.7 cannot decode them and still exits 0.
+# Use tools/udif_extract.py instead — see docs/RE-SETUP.md.
+
 # 2. Identify the engine — do this before anything else
 strings mnt/'Game.app'/Contents/MacOS/Game | grep -iE 'unity|unreal|godot|monogame'
 
@@ -64,6 +67,7 @@ check the log for `ERROR` and confirm the output file is non-empty.
 docs/RE-SETUP.md                 toolchain docs, workflow, troubleshooting
 scripts/install-re-tools.sh      idempotent toolchain installer
 scripts/verify-re-tools.sh       smoke test incl. live decompile + APK export
+tools/udif_extract.py            UDIF/DMG → raw image; handles LZFSE DMGs
 tools/ghidra-scripts/
   DecompileAll.java              headless post-script: decompile all functions
 ```

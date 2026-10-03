@@ -59,7 +59,7 @@ bash scripts/verify-re-tools.sh     # must report 0 failed
 
 | Tool | Location | Purpose |
 |---|---|---|
-| `dmg2img` | apt (1.6.7) | DMG → raw HFS+ disk image |
+| `dmg2img` | apt (1.6.7) | DMG → raw HFS+ disk image. **Cannot read LZFSE DMGs** — see below |
 | `hpmount`, `hpcopy`, `hpumount` | apt (`hfsplus`) | Mount/read HFS+ images. **Note the `hp*` prefix** — there is no bare `hfsplus` command. |
 | `bsdtar` (libarchive) | apt | Archive extraction incl. `cpio`, `xar` readers |
 | `7z` / `7za` | apt (`p7zip-full`) | Zip, gzip, xar |
@@ -120,6 +120,25 @@ hpumount mnt
 
 If the DMG has a UDIF resource-fork wrapper that `dmg2img` can't fully unpack,
 try `7z x game.dmg` first, or `binwalk game.dmg`.
+
+> **Gotcha: `dmg2img` 1.6.7 cannot read LZFSE DMGs — and exits `0` anyway.**
+> Modern DMGs compress with LZFSE. On those, `dmg2img` prints
+> `Unsupported or corrupted block found`, writes a short mostly-zero file,
+> and returns success, so a `&&` chain happily continues with garbage. Check
+> the output size against the DMG, or use `tools/udif_extract.py`:
+>
+> ```bash
+> /opt/re-tools/venv/bin/python tools/udif_extract.py --list game.dmg
+> /opt/re-tools/venv/bin/python tools/udif_extract.py game.dmg game.img
+> ```
+>
+> It parses the `koly`/`blkx`/`mish` tables itself. Two things it handles that
+> naive parsers get wrong: all those integers are **big-endian**, and the
+> descriptor table is *not* at a fixed offset inside the mish blob.
+>
+> **`hpmount` needs the `hfsplus` kernel module.** In containers without it,
+> mount fails with `unknown filesystem type 'hfsplus'`; use 7-Zip ≥ 23.01
+> (`7zz x game.dmg`), which reads both UDIF and HFS+ in userspace.
 
 Inside a `.app` bundle, expect:
 
@@ -270,6 +289,7 @@ particular has bumped its JDK requirement across major versions.
 docs/RE-SETUP.md                 this file
 scripts/install-re-tools.sh      idempotent toolchain installer
 scripts/verify-re-tools.sh       smoke test: decompilation + real Android export
+tools/udif_extract.py            UDIF/DMG → raw image; handles LZFSE DMGs
 tools/ghidra-scripts/
   DecompileAll.java              headless post-script: decompile all functions
 ```

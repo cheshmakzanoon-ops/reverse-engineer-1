@@ -27,10 +27,14 @@ _binwalk/
 *.pcapng
 /scratch/
 /tmp/
+/work/
 
-# DMG / macOS extraction artifacts — large, licensed, and regenerable
+# DMG / macOS extraction artifacts — large, licensed, and regenerable.
+# Exception: games/ holds the source .dmg we deliberately version via Git LFS
+# (see .gitattributes). Derived images stay ignored.
 *.dmg
 *.img
+!games/*.dmg
 *.sparseimage
 /mnt/
 *.app/

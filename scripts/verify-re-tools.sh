@@ -89,10 +89,10 @@ section "Python libraries"
 # ---------------------------------------------------------------------------
 if [ -x "$VENV/bin/python" ]; then
   if "$VENV/bin/python" - <<'PY' >/dev/null 2>&1
-import capstone, pefile, lief, r2pipe, macholib, construct, z3  # noqa: F401
+import capstone, pefile, lief, r2pipe, macholib, construct, z3, lzfse  # noqa: F401
 PY
   then
-    ok "capstone, pefile, lief, r2pipe, macholib, construct, z3"
+    ok "capstone, pefile, lief, r2pipe, macholib, construct, z3, lzfse"
   else
     bad "one or more Python RE libraries failed to import"
   fi

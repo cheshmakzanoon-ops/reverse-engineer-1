@@ -43,6 +43,7 @@ PYTHON_RE_PACKAGES=(
   capstone pefile lief r2pipe pwntools   # generic RE
   macholib construct                     # Mach-O + binary parsing
   z3-solver uncompyle6 decompyle3        # constraint solving, Python bytecode
+  lzfse                                  # LZFSE DMG blocks (tools/udif_extract.py)
 )
 
 log()  { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
