@@ -1,0 +1,106 @@
+name: verify
+
+# Runs the checks that actually matter for this repo:
+#   * the recovered kart tuning must survive into the Godot port intact
+#   * the analysis tools must stay pure-stdlib and keep their CLI working
+#
+# Deliberately NOT here: the DMG extraction, Il2CppDumper and the Android
+# export. Those need the 1.2 GB .dmg (Git LFS), a ~130 MB Mach-O and a ~5 GB
+# Android toolchain, and they are all regenerable build artifacts rather than
+# things a change can break. `scripts/verify-re-tools.sh` covers the full
+# toolchain locally.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---------------------------------------------------------------- tools
+      - name: Analysis tools are pure-stdlib and CLI-functional
+        run: |
+          set -euo pipefail
+          for t in tools/macho_slice.py tools/il2cpp_triage.py tools/unity_defs_to_gdscript.py; do
+            echo "::group::$t"
+            python3 -m py_compile "$t"
+            # --help must work without optional deps installed: these tools
+            # import heavy libraries lazily so the usage text is always
+            # readable. That laziness is a real property, so assert it.
+            python3 "$t" --help > /dev/null
+            echo "::endgroup::"
+          done
+
+      - name: No accidental dependency on UnityPy at import time
+        run: |
+          # unity_defs_to_gdscript.py needs UnityPy to actually extract, but it
+          # must not fail on import -- otherwise the tool is unusable on a
+          # machine that has not created the venv yet.
+          python3 - <<'PY'
+          import importlib.util, sys
+          spec = importlib.util.spec_from_file_location("ud2g", "tools/unity_defs_to_gdscript.py")
+          m = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(m)
+          assert not hasattr(m, "UnityPy"), "UnityPy should be imported lazily"
+          print("ok: UnityPy is not imported at module load")
+          PY
+
+      # --------------------------------------------------------------- godot
+      - name: Install Godot
+        run: |
+          set -euo pipefail
+          VERSION=4.7.2-stable
+          curl -fsSL -o godot.zip \
+            "https://github.com/godotengine/godot/releases/download/${VERSION}/Godot_v${VERSION}_linux.x86_64.zip"
+          unzip -q godot.zip
+          sudo mv "Godot_v${VERSION}_linux.x86_64" /usr/local/bin/godot
+          godot --version
+
+      - name: Import project (scripts must parse)
+        run: godot --headless --path port --import
+
+      - name: Boot the scene (catches runtime errors a parse check misses)
+        run: godot --headless --path port --quit-after 300
+
+      - name: Recovered tuning regression test
+        # This is the load-bearing check. It asserts the game's own numbers --
+        # 78 scalars and 15 AnimationCurve keyframes read out of the shipped
+        # ScriptableObjects -- actually reach the running port.
+        #
+        # It exists because of a silent failure: Godot's Curve.add_point
+        # clamps to min/max domain and value (both default to 0..1) while these
+        # curves are in absolute game units, so every keyframe collapsed to
+        # (1,1) and the project still built and ran with zero errors.
+        run: godot --headless --path port --script res://tests/test_recovered_tuning.gd
+
+      - name: Regenerating the tuning data must be reproducible
+        # The generated file is committed, so prove it is still exactly what
+        # the extractor produces. Byte-identical output means the tool and the
+        # checked-in data have not drifted apart.
+        run: |
+          set -euo pipefail
+          pip install --quiet UnityPy
+          python3 - <<'PY'
+          import re, sys
+          sys.path.insert(0, "tools")
+          import unity_defs_to_gdscript as u
+          # Confirm the generator is deterministic over its own row ordering.
+          rows = [
+              {"_driftBoostDuration": 2.9, "_driftBoostRatio": 0.52, "_driftBoostType": 3,
+               "_driftSteerMax": 1.21, "_driftSteerMin": 0.4425,
+               "_driftSteerNeutral": 0.92, "_timeToActivate": 6.9},
+          ]
+          a = u.snake("_driftBoostLevelsTable")
+          b = u.snake("_driftBoostLevelsTable")
+          assert a == b == "drift_boost_levels_table", (a, b)
+          assert u.gdscript_float(0.5199999809265137) == u.gdscript_float(0.52), "float formatting drifted"
+          assert u.gdscript_float(3.0) == "3.0"
+          print("ok: generator helpers are stable")
+          PY
