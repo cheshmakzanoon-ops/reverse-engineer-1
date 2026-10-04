@@ -24,19 +24,22 @@ var _drift_bar: ProgressBar
 var _drift_tier: Label
 var _countdown_label: Label
 var _results_panel: PanelContainer
+var _info: VBoxContainer
+var _drift_box: VBoxContainer
 
 
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_build()
+	get_viewport().size_changed.connect(_layout)
+	_layout()
 
 
 func _build() -> void:
 	var root := VBoxContainer.new()
-	root.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	root.offset_left = 24
-	root.offset_top = 18
+	_info = root
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_theme_constant_override("separation", 2)
 	add_child(root)
 
@@ -50,17 +53,13 @@ func _build() -> void:
 	_status_label = _mk_label(root, 22, Color.WHITE)
 
 	# Speed, bottom right.
-	_speed_label = _mk_label(self, 44, Color(1, 1, 1))
-	_speed_label.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	_speed_label = _mk_label(self, 28, Color(1, 1, 1))
 	_speed_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_speed_label.offset_right = -28
-	_speed_label.offset_bottom = -24
 
 	# Drift charge, bottom left.
 	var drift_box := VBoxContainer.new()
-	drift_box.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	drift_box.offset_left = 28
-	drift_box.offset_top = -74
+	_drift_box = drift_box
+	drift_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	drift_box.custom_minimum_size = Vector2(260, 0)
 	add_child(drift_box)
 
@@ -80,8 +79,6 @@ func _build() -> void:
 
 	# Countdown, centred.
 	_countdown_label = _mk_label(self, 120, Color(1, 1, 1))
-	_countdown_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	_countdown_label.offset_top = 120
 	_countdown_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_countdown_label.text = ""
 
@@ -100,13 +97,30 @@ func _mk_label(parent: Node, px: int, colour: Color) -> Label:
 
 func _build_results() -> void:
 	_results_panel = PanelContainer.new()
-	_results_panel.set_anchors_preset(Control.PRESET_CENTER)
 	_results_panel.visible = false
-	_results_panel.offset_left = -260
-	_results_panel.offset_right = 260
-	_results_panel.offset_top = -170
-	_results_panel.offset_bottom = 190
 	add_child(_results_panel)
+
+
+func _layout() -> void:
+	var safe := get_viewport_rect()
+	if OS.has_feature("android"):
+		var native := Rect2(DisplayServer.get_display_safe_area())
+		if native.has_area():
+			var converted: Rect2 = get_viewport().get_screen_transform().affine_inverse() * native
+			var clipped := safe.intersection(converted)
+			if clipped.has_area():
+				safe = clipped
+	safe = safe.grow(-24.0)
+	_info.position = safe.position
+	_info.size.x = minf(500.0, safe.size.x * 0.5)
+	_speed_label.position = Vector2(safe.end.x - 220.0, safe.end.y - 44.0)
+	_speed_label.size = Vector2(220.0, 44.0)
+	_drift_box.position = Vector2(safe.position.x, safe.end.y - 62.0)
+	_drift_box.size = Vector2(260.0, 62.0)
+	_countdown_label.position = Vector2(safe.get_center().x - 120.0, safe.position.y + 120.0)
+	_countdown_label.size = Vector2(240.0, 160.0)
+	_results_panel.size = Vector2(minf(640.0, safe.size.x), 400.0)
+	_results_panel.position = safe.get_center() - _results_panel.size * 0.5
 
 
 func bind(d: RaceDirector, p: Kart) -> void:
@@ -126,7 +140,7 @@ func _process(_delta: float) -> void:
 		_countdown_label.text = ""
 
 	if player != null:
-		_speed_label.text = "%d" % int(absf(player.speed))
+		_speed_label.text = "SPEED %d" % int(absf(player.speed))
 		_update_drift()
 		_item_label.text = player.inventory.display_name()
 		if not player.inventory.last_error.is_empty():

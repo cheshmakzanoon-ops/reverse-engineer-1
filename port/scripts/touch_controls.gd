@@ -9,6 +9,7 @@ var throttle: float = 0.0
 var handbrake_held: bool = false
 var is_touch_active: bool = false
 var enabled: bool = true
+var controls_visible: bool = true
 var _fingers: Dictionary = {}
 var _stick_origin := Vector2.ZERO
 var _stick_pos := Vector2.ZERO
@@ -27,7 +28,7 @@ func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	is_touch_active = OS.has_feature("mobile")
-	visible = is_touch_active
+	visible = is_touch_active and controls_visible
 	queue_redraw()
 
 func safe_rect() -> Rect2:
@@ -53,7 +54,7 @@ func _input(event: InputEvent) -> void:
 	var handled := false
 	if event is InputEventScreenTouch:
 		is_touch_active = true
-		visible = true
+		visible = controls_visible
 		if event.pressed and not event.canceled:
 			handled = _on_press(event.index, event.position)
 		else:
@@ -129,6 +130,12 @@ func consume_item() -> bool:
 	_item_requested = false
 	return requested
 
+func set_controls_visible(value: bool) -> void:
+	# Visibility is a presentation preference; it does not disable touch input.
+	controls_visible = value
+	visible = is_touch_active and controls_visible
+	queue_redraw()
+
 func set_enabled(value: bool) -> void:
 	enabled = value
 	if not value:
@@ -155,7 +162,7 @@ func _exit_tree() -> void:
 	release_all()
 
 func _draw() -> void:
-	if not is_touch_active or not enabled:
+	if not is_touch_active or not enabled or not controls_visible:
 		return
 	var center := control_center("steer")
 	var radius := control_radius("steer")

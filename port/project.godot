@@ -5,7 +5,7 @@ config_version=5
 config/name="Kart Lab"
 config/icon="res://branding/icon.svg"
 config/description="Incomplete engineering reconstruction using recovered data; native parity unverified."
-run/main_scene="res://scenes/main.tscn"
+run/main_scene="res://scenes/frontend.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 
 [rendering]
@@ -59,3 +59,7 @@ use_item={
 "deadzone": 0.5,
 "events": [Object(InputEventKey,"physical_keycode":69), Object(InputEventJoypadButton,"button_index":2)]
 }
+
+[input_devices]
+
+pointing/emulate_mouse_from_touch=true

@@ -63,16 +63,13 @@ jobs:
           --log verification/boot.log --
           godot --headless --path port --quit-after 300
 
-      - name: Execute every Godot regression suite
-        shell: bash
+      - name: Install graphical UI test dependencies
         run: |
-          set -euo pipefail
-          for test in port/tests/test_*.gd; do
-            name="$(basename "$test" .gd)"
-            python3 scripts/checked_process.py --timeout 180 --require 'PASS:' \
-              --log "verification/$name.log" -- \
-              godot --headless --fixed-fps 60 --path port --script "res://tests/$name.gd"
-          done
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth libgl1-mesa-dri
+
+      - name: Execute every Godot regression suite
+        run: bash scripts/test_godot.sh verification
 
       - name: Preserve logs and exact reproduction inputs
         if: always()

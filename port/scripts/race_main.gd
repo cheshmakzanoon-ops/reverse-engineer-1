@@ -300,3 +300,14 @@ func _recover_kart(kart: Kart) -> void:
 	kart.respawn_at(director.recovery_transform(kart))
 	if kart.driver is KartAI:
 		kart.driver._reanchor()
+
+
+## Cancel UI gestures without stopping momentum or awarding a drift-release boost.
+## The session pauses the world separately, including AI and all timers.
+func cancel_player_input() -> void:
+	if is_instance_valid(touch):
+		touch.set_enabled(false)
+	if is_instance_valid(player_driver):
+		player_driver.cancel_input()
+	if is_instance_valid(player):
+		player._release_drift(false)
