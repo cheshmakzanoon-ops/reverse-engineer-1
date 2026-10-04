@@ -173,9 +173,11 @@ def build(args: argparse.Namespace) -> dict:
             preset_path = project / "export_presets.cfg"
             preset_path.write_text(preset_path.read_text().replace("architectures/arm64-v8a=true", "architectures/arm64-v8a=false").replace("architectures/x86_64=false", "architectures/x86_64=true"))
         run([args.godot, "--headless", "--path", project, "--import"], env, secrets, 240)
-        run([args.godot, "--headless", "--path", project, "--editor", "--install-android-build-template", "--quit"], env, secrets, 120)
         preset = "Android Release" if release else ("Android Bundle Test" if kind == "aab" else "Android Test")
-        run([args.godot, "--headless", "--path", project, "--export-release" if release else "--export-debug", preset, output], env, secrets)
+        # Godot only processes template installation as part of an export. A
+        # standalone --editor/--quit command exits zero without installing it.
+        run([args.godot, "--headless", "--path", project, "--install-android-build-template",
+             "--export-release" if release else "--export-debug", preset, output], env, secrets)
         validate_archive(output, kind, abi)
         package = PACKAGE if release else PACKAGE + ".test"
         tools = sdk / "build-tools" / BUILD_TOOLS

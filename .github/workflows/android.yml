@@ -28,6 +28,10 @@ jobs:
         run: python3 -m unittest discover -s tests -p 'test_*.py' -v
       - name: Install pinned engine/templates and Android dependencies
         run: bash scripts/install_android_toolchain.sh "$RUNNER_TEMP/kart-toolchain"
+      - name: Verify template installation with the pinned engine
+        run: |
+          GODOT_TEST_BIN="$RUNNER_TEMP/kart-toolchain/bin/godot" \
+            python3 -m unittest discover -s tests -p 'test_android_build.py' -v
       - name: Export and verify arm64 APK, test-signed AAB and emulator APK
         shell: bash
         run: |

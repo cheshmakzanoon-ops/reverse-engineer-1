@@ -1,10 +1,13 @@
 """Packaging checks are structural/signing gates, not Android runtime claims."""
 import importlib.util
+import argparse
+import os
 import contextlib
 import io
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 from pathlib import Path
 
@@ -100,6 +103,112 @@ class AndroidBuildTests(unittest.TestCase):
             self.assertIn(f'name="{name}"', text)
         self.assertNotIn('permissions/internet=true', text)
         self.assertNotIn("keystore/release_password", text)
+
+    def test_all_targets_install_template_on_the_export_invocation(self):
+        # Exercise build(), not a separately constructed example command. No SDK,
+        # signing operation or pretend APK is produced by this orchestration test.
+        class ExportReached(Exception):
+            pass
+
+        for target in ("debug-apk", "test-aab", "emulator-apk", "release-aab"):
+            with self.subTest(target=target), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                key, bundle = root / "fixture.keystore", root / "fixture.jar"
+                key.write_text("signing fixture; never passed to a signing tool")
+                bundle.touch()
+                calls = []
+
+                def record(command, *_args):
+                    command = [str(value) for value in command]
+                    calls.append(command)
+                    if "--version" in command:
+                        return self.module.ENGINE + ".stable.official.fixture\n"
+                    if "--export-debug" in command or "--export-release" in command:
+                        raise ExportReached
+                    return ""
+
+                env = {"GODOT_ANDROID_KEYSTORE_" + identity + "_" + name: value
+                       for identity in ("DEBUG", "RELEASE") for name, value in
+                       (("PATH", str(key)), ("USER", "fixture"), ("PASSWORD", "fixture-password"))}
+                args = argparse.Namespace(target=target, sdk=str(root / "sdk"),
+                                          java=str(root / "java"), templates=str(root / "templates"),
+                                          godot="fixture-godot", bundletool=str(bundle),
+                                          output=str(root / ("result.aab" if target.endswith("aab") else "result.apk")))
+                with mock.patch.dict(os.environ, env, clear=True), \
+                        mock.patch.object(self.module, "preflight"), \
+                        mock.patch.object(self.module, "run", side_effect=record):
+                    with self.assertRaises(ExportReached):
+                        self.module.build(args)
+                exports = [c for c in calls if "--export-debug" in c or "--export-release" in c]
+                self.assertEqual(len(exports), 1)
+                self.assertIn("--install-android-build-template", exports[0])
+                self.assertNotIn("--quit", exports[0])
+                self.assertNotIn("--editor", exports[0])
+                self.assertEqual([c for c in calls if "--install-android-build-template" in c], exports)
+                expected = "Android Release" if target == "release-aab" else (
+                    "Android Bundle Test" if target == "test-aab" else "Android Test")
+                self.assertIn(expected, exports[0])
+                self.assertTrue(any("--import" in c for c in calls[:-1]))
+                self.assertFalse(Path(args.output).exists())
+
+    @unittest.skipUnless(os.environ.get("GODOT_TEST_BIN"), "set GODOT_TEST_BIN for real engine template regression")
+    def test_real_engine_installs_template_before_sdk_validation(self):
+        # A deliberately non-buildable template proves installation with the
+        # actual pinned engine. Export MUST fail on the missing SDK; this is not
+        # a package/signature/device test and produces no successful sidecar.
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            templates = root / "templates"
+            templates.mkdir()
+            wrapper = b"#!/bin/sh\nexit 79 # fixture, not an Android build\n"
+            with zipfile.ZipFile(templates / "android_source.zip", "w") as archive:
+                executable = zipfile.ZipInfo("gradlew")
+                executable.external_attr = 0o100755 << 16
+                archive.writestr(executable, wrapper)
+                archive.writestr("build.gradle", "// installation fixture only\n")
+            key = root / "fixture.keystore"
+            key.write_text("not a key; SDK validation must prevent signing")
+            env = dict(os.environ)
+            for name in list(env):
+                if name.startswith("GODOT_ANDROID_KEYSTORE_"):
+                    del env[name]
+            env.update({"GODOT_ANDROID_KEYSTORE_DEBUG_" + name: value for name, value in
+                        (("PATH", str(key)), ("USER", "fixture"), ("PASSWORD", "fixture-password"))})
+            args = argparse.Namespace(target="debug-apk", sdk=str(root / "no-sdk"),
+                                      java=str(root / "no-java"), templates=str(templates),
+                                      godot=os.environ["GODOT_TEST_BIN"], bundletool="/not-used",
+                                      output=str(root / "must-not-exist.apk"))
+            observed = {}
+            original_run = self.module.run
+
+            def inspect_install(command, *run_args):
+                try:
+                    return original_run(command, *run_args)
+                finally:
+                    if "--export-debug" in command:
+                        project = Path(command[command.index("--path") + 1])
+                        gradlew = project / "android/build/gradlew"
+                        version = project / "android/.build_version"
+                        observed["wrapper"] = gradlew.read_bytes() if gradlew.is_file() else None
+                        observed["version"] = version.read_text().strip() if version.is_file() else None
+                        observed["ignored"] = (project / "android/build/.gdignore").is_file()
+                        observed["executable"] = os.access(gradlew, os.X_OK)
+
+            output = io.StringIO()
+            with mock.patch.dict(os.environ, env, clear=True), \
+                    mock.patch.object(self.module, "preflight"), \
+                    mock.patch.object(self.module, "run", side_effect=inspect_install), \
+                    contextlib.redirect_stdout(output):
+                with self.assertRaisesRegex(ValueError, "Build command failed"):
+                    self.module.build(args)
+            self.assertEqual(observed.get("wrapper"), wrapper)
+            self.assertEqual(observed.get("version"), self.module.ENGINE + ".stable")
+            self.assertTrue(observed.get("ignored"))
+            self.assertTrue(observed.get("executable"))
+            self.assertIn("Invalid Android SDK path", output.getvalue())
+            self.assertNotIn("Android build template not installed", output.getvalue())
+            self.assertFalse(Path(args.output).exists())
+            self.assertFalse(Path(args.output + ".json").exists())
 
     def test_preflight_rejects_missing_sdk_before_export(self):
         with self.assertRaises(ValueError):
