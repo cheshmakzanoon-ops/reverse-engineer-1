@@ -33,14 +33,13 @@ def drive_id(value: str) -> str:
 
 def run(command: list[str], log: Path, *, timeout: float = 1800) -> None:
     """No shell interpolation; preserve diagnostics and reject failures/timeouts."""
-    with log.open('xb') as output:
-        try:
-            result = subprocess.run(command, stdout=output, stderr=subprocess.STDOUT,
-                                    timeout=timeout, check=False)
-        except subprocess.TimeoutExpired as exc:
-            raise ContentError(f'Command timed out; inspect {log.name}') from exc
-    if result.returncode:
-        raise ContentError(f'Command failed with exit {result.returncode}; inspect {log.name}')
+    from tools.content_batches import run_bounded
+    try:
+        run_bounded(command, log, timeout)
+    except subprocess.TimeoutExpired as exc:
+        raise ContentError(f'Command timed out; inspect {log.name}') from exc
+    except subprocess.CalledProcessError as exc:
+        raise ContentError(f'Command failed with exit {exc.returncode}; inspect {log.name}') from exc
 
 
 def prepare_directories(workspace: Path, reports: Path) -> None:
@@ -136,6 +135,17 @@ def inventory_summary(catalog: dict) -> dict:
             'godot_imported': False, 'original_source_recovered': False, 'complete_game': False}
 
 
+def inventory_command(content: Path, catalog: Path, checkpoints: Path, progress: Path,
+                      *, bundle_timeout: float, budget: float) -> list[str]:
+    """Metadata-only report lives outside private batch payloads and worker logs."""
+    from tools.content_batches import _positive
+    _positive(bundle_timeout, 'bundle_timeout'); _positive(budget, 'inventory_budget')
+    return [sys.executable, str(ROOT / 'tools/recover_content.py'), 'inventory',
+            str(content / 'Resources/Data'), str(catalog), '--checkpoints', str(checkpoints),
+            '--bundle-timeout', str(bundle_timeout), '--budget', str(budget),
+            '--progress-report', str(progress)]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group(required=True)
@@ -144,12 +154,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--workspace', type=Path, required=True)
     parser.add_argument('--reports', type=Path, required=True)
     parser.add_argument('--sevenzip', default=shutil.which('7zz') or shutil.which('7z') or '7zz')
+    parser.add_argument('--bundle-timeout', type=float, default=120)
+    parser.add_argument('--inventory-budget', type=float, default=1800)
     args = parser.parse_args(argv)
     report = {'schema': 1, 'source_commit': os.environ.get('GITHUB_SHA', 'local'), 'status': 'started',
               'source_verified': False, 'extracted': False, 'inventory_complete': False,
               'original_source_recovered': False, 'godot_imported': False, 'complete_game': False}
     prepared = False
     try:
+        from tools.content_batches import _positive
+        _positive(args.bundle_timeout, 'bundle_timeout'); _positive(args.inventory_budget, 'inventory_budget')
         prepare_directories(args.workspace, args.reports)
         prepared = True
         original = args.dmg if args.dmg else download_original(args.drive_id, args.workspace)
@@ -171,10 +185,15 @@ def main(argv: list[str] | None = None) -> int:
         # The inventory itself keeps raw media OUTSIDE the report directory.
         error = None
         try:
-            run([sys.executable, str(ROOT / 'tools/recover_content.py'), 'inventory',
-                 str(content / 'Resources/Data'), str(catalog_dir)], args.reports / 'inventory.log', timeout=2400)
+            run(inventory_command(content, catalog_dir, args.workspace / 'content-checkpoints',
+                                  args.reports / 'inventory-progress.json',
+                                  bundle_timeout=args.bundle_timeout, budget=args.inventory_budget),
+                args.reports / 'inventory.log', timeout=args.inventory_budget + 600)
         except ContentError as exc:
             error = str(exc)
+        progress_path = args.reports / 'inventory-progress.json'
+        if progress_path.is_file():
+            report['inventory_progress'] = json.loads(progress_path.read_text())
         catalog_file = catalog_dir / 'catalog.json'
         if catalog_file.is_file():
             catalog = json.loads(catalog_file.read_text())

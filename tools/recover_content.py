@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import signal
 from pathlib import Path
 try:
     from .content_pipeline import (ContentError, DMG_SHA256, DMG_BYTES, canonical, make_requirements,
@@ -34,6 +35,12 @@ def main(argv=None) -> int:
     plan.add_argument('--output',type=Path,required=True)
     scan=commands.add_parser('inventory',help='Read actual extracted AssetBundles; does not download or decrypt them')
     scan.add_argument('source',type=Path);scan.add_argument('output',type=Path)
+    scan.add_argument('--checkpoints', type=Path, help='Private per-bundle checkpoint directory; enables bounded workers')
+    scan.add_argument('--resume', action='store_true', help='Verify and reuse an existing compatible checkpoint job')
+    scan.add_argument('--bundle-timeout', type=float, default=120)
+    scan.add_argument('--budget', type=float, default=1800, help='Decoder/finalizer execution budget in seconds')
+    scan.add_argument('--max-bundles', type=int)
+    scan.add_argument('--progress-report', type=Path, help='Metadata-only progress report; never contains raw payloads')
     verify=commands.add_parser('verify-catalog');verify.add_argument('catalog',type=Path)
     bind=commands.add_parser('bind',help='Validate explicit analyst bindings against hashed catalog evidence')
     bind.add_argument('--catalog',type=Path,required=True);bind.add_argument('--requirements',type=Path,required=True)
@@ -47,7 +54,20 @@ def main(argv=None) -> int:
         if args.command=='verify-dmg':report=verify_source(args.path,expected_sha256=DMG_SHA256,expected_size=DMG_BYTES)
         elif args.command=='requirements':
             report=make_requirements(args.definitions,track=args.track,character=args.character,kart=args.kart);write_new(args.output,report)
-        elif args.command=='inventory':report=inventory(args.source,args.output)
+        elif args.command=='inventory':
+            if args.checkpoints:
+                # Running as a direct script still needs the repository root for
+                # the module worker's imports, independent of the caller's cwd.
+                root = str(Path(__file__).resolve().parents[1])
+                if root not in sys.path: sys.path.insert(0, root)
+                from tools.content_batches import inventory_batched
+                report=inventory_batched(args.source,args.output,args.checkpoints,
+                    resume=args.resume,bundle_timeout=args.bundle_timeout,budget=args.budget,
+                    max_bundles=args.max_bundles,report_path=args.progress_report)
+            elif (args.resume or args.max_bundles is not None or args.progress_report
+                  or args.bundle_timeout != 120 or args.budget != 1800):
+                raise ContentError('Inventory controls require --checkpoints')
+            else:report=inventory(args.source,args.output)
         elif args.command=='verify-catalog':report=verify_catalog(args.catalog)
         elif args.command=='bind':
             report=resolve_requirements(json.loads(args.requirements.read_text()),verify_catalog(args.catalog),json.loads(args.bindings.read_text()));write_new(args.output,report)
@@ -63,4 +83,11 @@ def main(argv=None) -> int:
         print('CONTENT GATE FAILED: '+str(e),file=sys.stderr)
         return 1
 
-if __name__=='__main__':raise SystemExit(main())
+def _cancel(_signal, _frame):
+    # Let the active bounded-worker context terminate its own process group.
+    raise KeyboardInterrupt
+
+if __name__=='__main__':
+    signal.signal(signal.SIGTERM, _cancel)
+    try: raise SystemExit(main())
+    except KeyboardInterrupt: raise SystemExit(130)

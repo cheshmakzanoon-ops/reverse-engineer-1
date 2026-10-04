@@ -11,7 +11,7 @@ original source-code recovery, emulator, or wrapper around the macOS binary.
 | Recovered definitions | 814 ScriptableObjects represented in the committed data; generated GDScript validated by tests |
 | Track structure | 16 decoded maps, including 12 race routes; generated roads are not imported original track art |
 | Kart/input | Per-kart commands, isolated AI/player input, selected profiles, forward grid heading, HUD binding, touch cancellation and reset state have runtime regressions |
-| Test baseline | 483 Godot checks across 16 suites and 74 Python tests pass locally; import and 360-frame headless boot pass |
+| Test baseline | 483 Godot checks across 16 suites and 146 Python tests pass locally; import and 360-frame headless boot pass |
 | Full race correctness | Six karts physically complete three Arlen Speedway laps through 188 ordered gates, with and without combat. Pickup contacts, held inventory and item effects have behavioral tests; the additional one-lap session integration saves the actual result and restores it in a fresh application instance |
 | Front end / local progress | Title, setup, settings, loading, pause, restart, results, rematch and menus are connected; 70 graphical checks include actual synthetic screen touches, focus loss, two-finger pause and safe-area layout. Two-generation local saves have 32 checks |
 | Android | Template installation is now paired with export. Local attempts stop on missing SDK/templates; the repaired CI job was still queued when checked. No APK/AAB, emulator or physical-device success is claimed for this revision |
@@ -38,6 +38,18 @@ See [content recovery commands and limits](docs/CONTENT-RECOVERY.md),
 [the content increment evidence](docs/status/2026-10-04-content-pipeline.md), and
 [the exact unresolved Arlen requirements](docs/status/2026-10-04-arlen-content-requirements.json).
 The original-content and Android status rows above are not promoted to success.
+
+## Bounded original-content inventory
+
+The recovery runner now checkpoints bundles and bounds decoder/finalizer
+processes. A timeout retains completed private work and an object/phase cursor;
+resume verifies source, decoder and payload hashes before reuse. The final
+catalog still requires the existing full reference/integrity gates. See
+[commands and limits](docs/BOUNDED-CONTENT-INVENTORY.md) and
+[the increment evidence](docs/status/2026-10-04-bounded-inventory.md).
+The 30 new regression tests are authored-fixture/process tests, **not new
+original-game extraction or art integration evidence**. Private checkpoint
+payloads are not included in public CI artifacts.
 
 ## What recovery means
 

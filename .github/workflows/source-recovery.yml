@@ -8,6 +8,11 @@ on:
       - '.github/workflows/source-recovery.yml'
       - 'scripts/recover_source.py'
       - 'tools/content_unity.py'
+      - 'tools/content_batches.py'
+      - 'tools/content_pipeline.py'
+      - 'tools/recover_content.py'
+      - 'tools/content-requirements.txt'
+      - 'tests/test_content_batches.py'
   workflow_dispatch:
 
 permissions:
@@ -38,7 +43,7 @@ jobs:
           sudo apt-get install -y 7zip
           python -m pip install 'gdown==5.2.0' -r tools/content-requirements.txt
       - name: Test source gates before reading production input
-        run: python -m unittest tests.test_source_recovery tests.test_content_pipeline tests.test_content_integrity -v
+        run: python -m unittest tests.test_source_recovery tests.test_content_pipeline tests.test_content_integrity tests.test_content_batches -v
       - name: Download, verify, extract and inventory original
         run: |
           python scripts/recover_source.py --drive-id "$SOURCE_DRIVE_ID" \
@@ -53,11 +58,15 @@ jobs:
             verification/source/recovery.json
             verification/source/extracted-files.json
             verification/source/inventory-summary.json
+            verification/source/inventory-progress.json
             verification/source/catalog-index.json
             verification/source/extraction.log
             verification/source/inventory.log
           if-no-files-found: warn
           retention-days: 3
+      # Checkpoint payloads/worker logs contain original content: never upload
+      # them as plaintext. This hosted run keeps progress metadata only; local
+      # --resume requires retaining the private workspace on the same host.
       - name: Remove ephemeral original media
         if: always()
         run: rm -rf -- "$RUNNER_TEMP/kart-original"

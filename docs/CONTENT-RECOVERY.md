@@ -36,7 +36,10 @@ required by the stdlib tools; this increment was tested on Python 3.13.
 python3 -m venv .venv-content
 .venv-content/bin/python -m pip install -r tools/content-requirements.txt
 .venv-content/bin/python tools/recover_content.py inventory \
-  /absolute/extracted/Game.app/Contents/Resources/Data /absolute/new-content-catalog
+  /absolute/extracted/Game.app/Contents/Resources/Data /absolute/new-content-catalog \
+  --checkpoints /absolute/private-content-checkpoints \
+  --bundle-timeout 120 --budget 1800 \
+  --progress-report /absolute/reports/inventory-progress.json
 ```
 
 UnityPy is pinned to **1.25.4** and the adapter refuses other versions. Its source
@@ -46,6 +49,11 @@ Transitive Python packages are not locked by this first adapter increment.
 `tools/extract_assets.py --production INPUT_DIRECTORY NEW_OUTPUT_DIRECTORY`
 also invokes this path. Legacy scene/route extraction remains unchanged, so
 regenerating the committed track/tuning data is not coupled to this new format.
+
+For timeout isolation, resumability, checkpoint integrity and hosted/private
+storage boundaries, see [bounded inventory](BOUNDED-CONTENT-INVENTORY.md).
+The legacy no-checkpoint invocation remains available for compatibility; it
+runs the same decoder and catalog gates without per-bundle process limits.
 
 ## 2. Inventory and reference integrity
 

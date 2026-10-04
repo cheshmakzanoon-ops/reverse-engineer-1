@@ -75,106 +75,148 @@ def decode_mesh(obj) -> dict:
     return result
 
 
-def inventory(root: Path, output: Path, *, loader: Callable | None=None,
-              mesh_decoder: Callable | None=None) -> dict:
-    """Read source without modifying it; create a fresh diagnostics/catalog tree.
+def read_bundle(root: Path, source: dict, output: Path, *, loader: Callable | None = None,
+                mesh_decoder: Callable | None = None, progress: Callable | None = None) -> dict:
+    """Decode one source bundle without resolving cross-bundle edges yet.
 
-    Injected loaders are for tests and label the output synthetic. CLI always
-    calls the real pinned UnityPy loader. Errors are recorded and gate export.
+    Its receipt is only intermediate recovery data, never an assembled catalog.
+    Progress includes object identity/type/phase, not typetrees or raw payloads.
     """
-    sources=source_files(root)
+    loader = loader or load_unitypy().load
+    decoder = mesh_decoder or decode_mesh
+    path = safe_child(root, source['path'])
+    verify_source(path, expected_sha256=source['sha256'], expected_size=source['bytes'])
+    files, objects, errors = [], [], []
+    def note(phase, obj=None):
+        if progress:
+            value = {'phase': phase, 'objects_done': len(objects)}
+            if obj is not None:
+                value.update(object_id=object_id(source['path']+'/'+obj.assets_file.name, obj.path_id),
+                             object_type=obj.type.name)
+            progress(value)
+    note('load')
+    try:
+        env = loader(str(path))
+        readers = list(env.objects)
+        if not readers:
+            raise ContentError('Bundle has no decoded serialized objects')
+    except Exception as error:
+        return {'files': [], 'objects': [], 'errors': [
+            {'source': source['path'], 'reason': type(error).__name__+': '+str(error)}]}
+    owning = {}
+    for obj in readers:
+        sf = obj.assets_file
+        if sf.name in owning and owning[sf.name] is not sf:
+            raise ContentError('Duplicate serialized-file names within bundle '+source['path'])
+        owning[sf.name] = sf
+    for name, sf in sorted(owning.items()):
+        files.append({'key': source['path']+'/'+name, 'bundle': source['path'], 'name': name,
+                      'externals': [e.path for e in sf.externals],
+                      'external_metadata': [{'path': e.path, 'guid': encode_tree(getattr(e, 'guid', None)),
+                                             'type': getattr(e, 'type', None)} for e in sf.externals]})
+    for obj in sorted(readers, key=lambda o: (o.assets_file.name, o.path_id)):
+        fk = source['path']+'/'+obj.assets_file.name
+        identity = object_id(fk, obj.path_id)
+        record = {'id': identity, 'file': fk, 'path_id': str(obj.path_id), 'type': obj.type.name,
+                  'name': '', 'artifacts': [], 'references': [], 'errors': [], 'conversion': 'raw-only'}
+        try:
+            note('raw-object', obj)
+            record['artifacts'].append(_artifact(output, f'objects/{identity}.bin', obj.get_raw_data(), 'raw-object'))
+            note('typetree', obj)
+            tree = _parse(obj)
+            record['name'] = tree.get('m_Name', '') if isinstance(tree.get('m_Name', ''), str) else ''
+            record['artifacts'].append(_artifact(output, f'objects/{identity}.json', canonical(encode_tree(tree)), 'typetree'))
+        except Exception as error:
+            record['errors'].append({'field': '', 'reason': 'decode: '+type(error).__name__+': '+str(error)})
+            objects.append(record)
+            continue
+        if obj.type.name == 'Mesh':
+            try:
+                note('mesh', obj)
+                record['artifacts'].append(_artifact(output, f'meshes/{identity}.json',
+                                                     canonical(encode_tree(decoder(obj))), 'decoded-mesh'))
+                record['conversion'] = 'decoded-mesh-not-assembled'
+            except Exception as error:
+                record['errors'].append({'field': '', 'reason': 'mesh: '+str(error)})
+        elif obj.type.name in ('Texture2D', 'Sprite'):
+            try:
+                import io
+                note('image', obj)
+                image = obj.parse_as_object().image
+                if image is None or min(image.size) < 1:
+                    raise ContentError('Empty decoded image')
+                buf = io.BytesIO()
+                image.convert('RGBA').save(buf, format='PNG', compress_level=9)
+                record['artifacts'].append(_artifact(output, f'images/{identity}.png', buf.getvalue(), 'decoded-image'))
+                record['conversion'] = 'decoded-image-not-bound'
+            except Exception as error:
+                record['errors'].append({'field': '', 'reason': 'image: '+str(error)})
+        objects.append(record)
+    note('decoded')
+    verify_source(path, expected_sha256=source['sha256'], expected_size=source['bytes'])
+    return {'files': files, 'objects': objects, 'errors': errors}
+
+
+def finish_catalog(stage: Path, sources: list[dict], files: list[dict], objects: list[dict],
+                   errors: list[dict], *, synthetic: bool) -> dict:
+    """Resolve all edges only after all bundle records are available."""
+    import copy
+    idx = AssetIndex(files, copy.deepcopy(objects))
+    for identity, record in sorted(idx.objects.items()):
+        typed = next((a for a in record['artifacts'] if a['role'] == 'typetree'), None)
+        if typed:
+            tree = decode_tree(json.loads(safe_child(stage, typed['path']).read_text()))
+            refs, missing = idx.references(identity, tree)
+            record['references'] = refs
+            record['errors'].extend(missing)
+    object_errors = sum(len(o['errors']) for o in idx.objects.values())
+    catalog = {'schema': SCHEMA, 'status': 'incomplete' if errors or object_errors else 'indexed',
+               'source_status': 'synthetic-adapter-fixture' if synthetic else 'unity-bundle-bytes-read',
+               'unity_version': UNITY_VERSION, 'unitypy_version': None if synthetic else UNITYPY_VERSION,
+               'sources': sources, 'files': sorted(files, key=lambda f: f['key']),
+               'objects': sorted(idx.objects.values(), key=lambda o: o['id']), 'errors': errors,
+               'counts': {'bundles': sum(s['kind']=='bundle' for s in sources), 'objects': len(idx.objects),
+                          'types': dict(sorted(Counter(o['type'] for o in idx.objects.values()).items())),
+                          'errors': len(errors)+object_errors},
+               'original_media_complete': False, 'godot_imported': False,
+               'limitations': ['Addressables GUIDs need catalog evidence, not filename matching.',
+                               'Raw Animator/clip/LOD/VFX records do not imply converted runtime behavior.',
+                               'Banks are hashed, not decoded as audio. Fonts/raw media are local-only.']}
+    (stage/'catalog.json').write_bytes(canonical(catalog))
+    verify_catalog(stage)
+    return catalog
+
+
+def inventory(root: Path, output: Path, *, loader: Callable | None = None,
+              mesh_decoder: Callable | None = None) -> dict:
+    """Legacy single-process path, preserving its output schema and bytes.
+
+    The checkpoint CLI uses the same decoder and finalizer in bounded processes.
+    """
+    sources = source_files(root)
     if output.exists() or output.is_symlink() or output.resolve().is_relative_to(root.resolve()):
         raise ContentError('Use a new output directory outside the source tree')
-    injected=loader is not None
-    if loader is None:loader=load_unitypy().load
-    decoder=mesh_decoder or decode_mesh
-    output.parent.mkdir(parents=True,exist_ok=True)
-    stage=Path(tempfile.mkdtemp(prefix='content-',dir=output.parent))
-    files=[];objects=[];errors=[]
+    injected = loader is not None
+    if loader is None:
+        loader = load_unitypy().load
+    output.parent.mkdir(parents=True, exist_ok=True)
+    stage = Path(tempfile.mkdtemp(prefix='content-', dir=output.parent))
+    files, objects, errors = [], [], []
     try:
         for source in sources:
-            if source['kind']!='bundle':continue
-            path=safe_child(root,source['path'])
-            try:
-                env=loader(str(path));readers=list(env.objects)
-                if not readers:raise ContentError('Bundle has no decoded serialized objects')
-            except Exception as e:
-                errors.append({'source':source['path'],'reason':type(e).__name__+': '+str(e)})
+            if source['kind'] != 'bundle':
                 continue
-            owning={}
-            for obj in readers:
-                sf=obj.assets_file
-                if sf.name in owning and owning[sf.name] is not sf:
-                    raise ContentError('Duplicate serialized-file names within bundle '+source['path'])
-                owning[sf.name]=sf
-            for name,sf in sorted(owning.items()):
-                key=source['path']+'/'+name
-                files.append({'key':key,'bundle':source['path'],'name':name,
-                              'externals':[e.path for e in sf.externals],
-                              'external_metadata':[{'path':e.path,'guid':encode_tree(getattr(e,'guid',None)),
-                                                    'type':getattr(e,'type',None)} for e in sf.externals]})
-            for obj in sorted(readers,key=lambda o:(o.assets_file.name,o.path_id)):
-                fk=source['path']+'/'+obj.assets_file.name;identity=object_id(fk,obj.path_id)
-                record={'id':identity,'file':fk,'path_id':str(obj.path_id),'type':obj.type.name,'name':'',
-                        'artifacts':[],'references':[],'errors':[],'conversion':'raw-only'}
-                try:
-                    raw=obj.get_raw_data()
-                    record['artifacts'].append(_artifact(stage,f'objects/{identity}.bin',raw,'raw-object'))
-                    tree=_parse(obj)
-                    record['name']=tree.get('m_Name','') if isinstance(tree.get('m_Name',''),str) else ''
-                    record['artifacts'].append(_artifact(stage,f'objects/{identity}.json',canonical(encode_tree(tree)),'typetree'))
-                except Exception as e:
-                    record['errors'].append({'field':'','reason':'decode: '+type(e).__name__+': '+str(e)})
-                    objects.append(record);continue
-                if obj.type.name=='Mesh':
-                    try:
-                        mesh=decoder(obj)
-                        record['artifacts'].append(_artifact(stage,f'meshes/{identity}.json',canonical(encode_tree(mesh)),'decoded-mesh'))
-                        record['conversion']='decoded-mesh-not-assembled'
-                    except Exception as e:record['errors'].append({'field':'','reason':'mesh: '+str(e)})
-                elif obj.type.name in ('Texture2D','Sprite'):
-                    try:
-                        import io
-                        image=obj.parse_as_object().image
-                        if image is None or min(image.size)<1:raise ContentError('Empty decoded image')
-                        buf=io.BytesIO();image.convert('RGBA').save(buf,format='PNG',compress_level=9)
-                        record['artifacts'].append(_artifact(stage,f'images/{identity}.png',buf.getvalue(),'decoded-image'))
-                        record['conversion']='decoded-image-not-bound'
-                    except Exception as e:record['errors'].append({'field':'','reason':'image: '+str(e)})
-                # Skins, bind poses, Animator state, clips, renderers, material
-                # properties, colliders, LOD and VFX typetrees remain intact.
-                objects.append(record)
-            del readers,env
-        idx=AssetIndex(files,objects)
-        for identity,record in sorted(idx.objects.items()):
-            typed=next((a for a in record['artifacts'] if a['role']=='typetree'),None)
-            if typed:
-                tree=decode_tree(json.loads(safe_child(stage,typed['path']).read_text()))
-                refs,missing=idx.references(identity,tree)
-                record['references']=refs;record['errors'].extend(missing)
-        object_errors=sum(len(o['errors']) for o in idx.objects.values())
-        catalog={'schema':SCHEMA,'status':'incomplete' if errors or object_errors else 'indexed',
-                 'source_status':'synthetic-adapter-fixture' if injected else 'unity-bundle-bytes-read',
-                 'unity_version':UNITY_VERSION,'unitypy_version':None if injected else UNITYPY_VERSION,
-                 'sources':sources,'files':sorted(files,key=lambda f:f['key']),
-                 'objects':sorted(idx.objects.values(),key=lambda o:o['id']),'errors':errors,
-                 'counts':{'bundles':sum(s['kind']=='bundle' for s in sources),'objects':len(idx.objects),
-                           'types':dict(sorted(Counter(o['type'] for o in idx.objects.values()).items())),
-                           'errors':len(errors)+object_errors},
-                 'original_media_complete':False,'godot_imported':False,
-                 'limitations':['Addressables GUIDs need catalog evidence, not filename matching.',
-                                'Raw Animator/clip/LOD/VFX records do not imply converted runtime behavior.',
-                                'Banks are hashed, not decoded as audio. Fonts/raw media are local-only.']}
-        # Catch mutations/races in source reads before publishing any catalog.
+            result = read_bundle(root, source, stage, loader=loader, mesh_decoder=mesh_decoder)
+            files.extend(result['files']); objects.extend(result['objects']); errors.extend(result['errors'])
         for source in sources:
-            verify_source(safe_child(root,source['path']),expected_sha256=source['sha256'],expected_size=source['bytes'])
-        (stage/'catalog.json').write_bytes(canonical(catalog))
-        verify_catalog(stage)
-        if output.exists():raise ContentError('Output appeared during inventory')
-        os.rename(stage,output)
+            verify_source(safe_child(root, source['path']), expected_sha256=source['sha256'], expected_size=source['bytes'])
+        catalog = finish_catalog(stage, sources, files, objects, errors, synthetic=injected)
+        if output.exists():
+            raise ContentError('Output appeared during inventory')
+        os.rename(stage, output)
         return catalog
-    except Exception:
-        shutil.rmtree(stage,ignore_errors=True)
+    except BaseException:
+        shutil.rmtree(stage, ignore_errors=True)
         raise
 
 
