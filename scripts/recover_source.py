@@ -68,6 +68,15 @@ def download_original(identity: str, workspace: Path) -> Path:
     return original
 
 
+def extract_original(original: Path, extracted: Path, reports: Path, sevenzip: str) -> None:
+    # Verified original contains an installer shortcut to /Applications outside
+    # the game .app. Exclude only that entry; never enable unsafe link extraction
+    # or treat a nonzero extractor exit as success.
+    run([sevenzip, 'x', '-y', '-bsp0', '-bso0',
+         '-x!Warped Kart Racers/Applications', '-o' + str(extracted), str(original)],
+        reports / 'extraction.log')
+
+
 def find_application(extracted: Path) -> Path:
     found = [p.parent.parent for p in extracted.rglob('Frameworks/GameAssembly.dylib')
              if p.is_file() and not p.is_symlink() and p.parent.parent.name == 'Contents'
@@ -148,8 +157,7 @@ def main(argv: list[str] | None = None) -> int:
         report['source_verified'] = True
         print('SOURCE_VERIFIED ' + json.dumps(report['source']), flush=True)
         extracted = args.workspace / 'extracted'
-        run([args.sevenzip, 'x', '-y', '-bsp0', '-bso0', '-o' + str(extracted), str(original)],
-            args.reports / 'extraction.log')
+        extract_original(original, extracted, args.reports, args.sevenzip)
         content = find_application(extracted)
         manifest = extracted_manifest(content)
         report['analysis_inputs'] = binary_metadata(content)

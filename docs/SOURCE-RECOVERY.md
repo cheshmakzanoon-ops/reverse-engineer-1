@@ -55,3 +55,19 @@ header validation, deterministic extracted manifests, sidecar exclusion,
 symlink rejection, output preservation, command failures/timeouts and honest
 status/report separation. Production results must be attached to an actual run
 and source commit; adding this workflow is not itself evidence of extraction.
+
+## First real source run
+
+Run `37189518516` at `c453addd6a8c752a1d157d88a082dd359028ea73` successfully
+downloaded the exact 1,190,250,225-byte original and verified its SHA-256.
+The Ubuntu 7-Zip extractor stopped because the outer disk image includes
+`Warped Kart Racers/Applications`, an absolute installer shortcut to
+`/Applications`. The extraction command now excludes only that outer entry.
+Unsafe-link extraction remains disabled and every other extractor error still
+fails the job. This repairs the observed failure; the following real run must
+prove actual application extraction and inventory separately.
+
+In parallel, the Android export presets now enable normal app-library visibility
+and disable HOME-launcher mode. The previous configuration confused a device's
+home-screen replacement with an ordinary launchable game. The signature, API,
+ABI and launcher checks are unchanged; actual new builds remain required.
