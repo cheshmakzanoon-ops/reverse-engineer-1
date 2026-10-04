@@ -17,6 +17,11 @@ import zipfile
 from pathlib import Path
 from typing import Mapping, Sequence
 
+try:
+    from scripts.android_manifest import apk_analyzer, validate_launcher
+except ModuleNotFoundError:
+    from android_manifest import apk_analyzer, validate_launcher
+
 ENGINE = "4.7.2"
 BUILD_TOOLS = "36.0.0"
 PACKAGE = "io.github.cheshmakzanoonops.kartlab"
@@ -42,7 +47,7 @@ def release_credentials(env: Mapping[str, str]) -> tuple[Path, str, str]:
 
 
 def preflight(sdk: Path, java: Path, templates: Path) -> None:
-    required = [sdk / "platform-tools/adb", sdk / "platforms/android-36/android.jar"]
+    required = [apk_analyzer(sdk), sdk / "platform-tools/adb", sdk / "platforms/android-36/android.jar"]
     required += [sdk / "build-tools" / BUILD_TOOLS / name for name in ("aapt", "apksigner", "zipalign")]
     required += [java / "bin" / name for name in ("java", "keytool", "jarsigner")]
     required += [templates / name for name in ("android_debug.apk", "android_release.apk", "android_source.zip")]
@@ -74,8 +79,11 @@ def validate_archive(path: Path, kind: str, abi: str) -> None:
                     raise ValueError("AAB has no RSA JAR-signing records; cryptographic verification must follow")
 
 
-def validate_badging(text: str, package: str) -> None:
+def validate_badging(text: str, package: str, *, require_launcher: bool = True) -> None:
     required = [rf"(?m)^package: name='{re.escape(package)}'", r"(?m)^sdkVersion:'24'", r"(?m)^targetSdkVersion:'36'", r"(?m)^launchable-activity: name='[^']+'"]
+    if not require_launcher:
+        # Only build() opts out: it separately validates decoded manifest XML.
+        required = required[:-1]
     if not all(re.search(pattern, text) for pattern in required):
         raise ValueError("APK package, minimum/target SDK or launcher does not match export policy")
 
@@ -184,7 +192,10 @@ def build(args: argparse.Namespace) -> dict:
         if kind == "apk":
             run([tools / "apksigner", "verify", "--verbose", "--print-certs", output], env, secrets, 60)
             run([tools / "zipalign", "-c", "-P", "16", "-v", "4", output], env, secrets, 60)
-            validate_badging(run([tools / "aapt", "dump", "badging", output], env, secrets, 60), package)
+            validate_badging(run([tools / "aapt", "dump", "badging", output], env, secrets, 60), package, require_launcher=False)
+            manifest = run([apk_analyzer(sdk), "manifest", "print", output], env, secrets, 120)
+            validate_manifest(manifest, package)
+            launcher = validate_launcher(manifest)
         else:
             verification = run([java / "bin/jarsigner", "-verify", output], env, secrets, 60)
             if "jar verified." not in verification.lower():
@@ -192,7 +203,8 @@ def build(args: argparse.Namespace) -> dict:
             run([java / "bin/java", "-jar", bundletool, "validate", "--bundle=" + str(output)], env, secrets, 120)
             manifest = run([java / "bin/java", "-jar", bundletool, "dump", "manifest", "--bundle=" + str(output), "--module=base"], env, secrets, 120)
             validate_manifest(manifest, package)
-        report = {"status": "packaging-verified", "file": output.name, "bytes": output.stat().st_size, "sha256": hashlib.sha256(output.read_bytes()).hexdigest(), "source_commit": env.get("GITHUB_SHA", "local-source; see source_digest"), "source_digest": project_hash, "godot": version, "package": package, "abi": abi, "min_sdk": 24, "target_sdk": 36, "test_signed": not release, "emulator_tested": False, "physical_device_tested": False, "complete_game": False}
+            launcher = validate_launcher(manifest)
+        report = {"status": "packaging-verified", "file": output.name, "bytes": output.stat().st_size, "sha256": hashlib.sha256(output.read_bytes()).hexdigest(), "source_commit": env.get("GITHUB_SHA", "local-source; see source_digest"), "source_digest": project_hash, "godot": version, "package": package, "launcher": launcher, "abi": abi, "min_sdk": 24, "target_sdk": 36, "test_signed": not release, "emulator_tested": False, "physical_device_tested": False, "complete_game": False}
         output.with_suffix(output.suffix + ".json").write_text(json.dumps(report, indent=2) + "\n")
         print(json.dumps(report, indent=2))
         return report
