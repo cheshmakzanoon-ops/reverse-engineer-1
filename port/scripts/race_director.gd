@@ -291,3 +291,12 @@ static func format_time(seconds: float) -> String:
 
 static func format_gap(seconds: float) -> String:
 	return "--.---" if seconds <= 0.0 else "+%.3f" % seconds
+
+## PORT-SIDE metric for recovered race pickup distribution bands.
+func distance_behind_leader(kart: Node3D) -> float:
+	if not _state.has(kart):
+		return 0.0
+	var leader := 0.0
+	for state in _state.values():
+		leader = maxf(leader, float(state["progress"]))
+	return maxf(leader - float(_state[kart]["progress"]), 0.0)

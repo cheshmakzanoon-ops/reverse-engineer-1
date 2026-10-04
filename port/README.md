@@ -2,7 +2,7 @@
 
 This is an **incomplete engineering reconstruction**, not the original source
 code or a finished Android game. The [root README](../README.md) and
-[current race evidence](../docs/status/2026-10-03-race.md) supersede historical
+[current item evidence](../docs/status/2026-10-03-items.md) supersede historical
 prototype APK and completion claims.
 
 ## Verified core race
@@ -11,10 +11,11 @@ Godot 4.7.2 headless tests drive six karts through three Arlen Speedway laps,
 188 ordered finite gates per lap, with actual CharacterBody3D motion rather
 than edited lap counters. Tests exercise countdown locking, forward crossing,
 ranking, finish times, automatic fall recovery, results and stopped finishers.
-The current increment passes 248 Godot checks and 13 Python tests locally.
+The current increment passes 338 Godot checks and 13 Python tests locally.
 
 The source snapshot still uses placeholder kart/road visuals and has no
-original audio. Pickup collision/inventory, pause/restart/menu/save flow,
+original audio. Pickup contacts, per-kart inventory, boosts, shields, projectiles, hazards and
+AI item use now have behavioral tests. Pause/restart/menu/save flow,
 original-content import and battle rules remain incomplete. Other maps have
 data/geometry checks, not this full-race proof. AI, interpolation, gates,
 recovery and physics include explicitly labelled port-side implementations;

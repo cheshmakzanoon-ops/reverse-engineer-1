@@ -1,185 +1,157 @@
-## Pickup boxes and what they roll, driven by the recovered definitions.
-##
-## The chain is entirely data-driven and none of it is invented:
-##
-##   PickupSpotBehaviour (per track, recovered from the map scene)
-##     -> PickupBoxDefinition      which box it is, and its respawn time
-##       -> PickupTableDefinition  weighted distribution of usable ids
-##         -> Usable_*             what the id actually does
-##
-## The weighted roll (`Weightage`, out of 100 in the shipped data) is the game's
-## own loot table. Arlen Speedway's 52 spots are all `PickupBox_Race_Default`,
-## so whatever that box resolves to is exactly what this track hands out.
-##
-## Only the effects that are actually implemented are wired to behaviour; the
-## rest roll and are held, so an unimplemented pickup shows up as a missing
-## effect rather than being quietly dropped from the table and changing the
-## odds of the ones that do work.
-
+## Recovered spots, box references and weights; PORT-SIDE deterministic rolls.
+## Race distance bands use validated distance behind the leader. That heuristic
+## and collision timing are not claimed to reproduce the native implementation.
 class_name PickupSpawner
 extends Node3D
-
 const GameDB := preload("res://scripts/data/game_db.gd")
 const Tracks := preload("res://scripts/data/tracks.gd")
-
-## usables the port actually implements, and what they do.
-enum Effect { BOOST, TRIPLE_BOOST, SHIELD, TURD, NONE }
-
+enum Effect { BOOST, TRIPLE_BOOST, SHIELD, TURD, NONE, PROJECTILE, SUPER_SHIELD, SATELLITE }
 signal kart_picked_up(kart: Node3D, usable_id: String, effect: Effect)
-
-@export var track_id: String = ""
-@export var kart_radius: float = 1.6
-@export var random_seed: int = 20202
-
+@export var track_id := ""
+@export var kart_radius := 1.6 # PORT-SIDE trigger radius, not original geometry.
+@export var random_seed := 20202
+var enabled := true
+var director: RaceDirector
+var rng := RandomNumberGenerator.new()
 class Spot extends RefCounted:
 	var area: Area3D
 	var position: Vector3
 	var box_id: String
 	var respawn_time: float
-	var timer: float = 0.0
-	var held: String = ""
-	var held_effect: int = Effect.NONE
-	var held_ratio: float = 1.0
-	var held_duration: float = 0.0
-
+	var timer := 0.0
+	var available := true
 var _spots: Array[Spot] = []
 
-
-## Build boxes from the track's recovered pickup spots.
 func build(id: String) -> void:
 	track_id = id
 	_spots.clear()
-	for child: Node in get_children():
+	rng.seed = random_seed
+	for child in get_children():
+		remove_child(child)
 		child.queue_free()
-
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.95, 0.75, 0.2, 0.55)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-
-	for spot in Tracks.pickup_spots(id):
-		var s := Spot.new()
-		s.position = spot["pos"]
-		s.box_id = str(spot["box"])
-		s.respawn_time = float(spot["respawn"])
-		var a := Area3D.new()
-		var cs := CollisionShape3D.new()
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(0.95, 0.75, 0.2, 0.7)
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	for data in Tracks.pickup_spots(id):
+		var spot := Spot.new()
+		spot.position = data["pos"]
+		spot.box_id = str(data["box"])
+		spot.respawn_time = float(data["respawn"])
+		var area := Area3D.new()
+		area.collision_layer = 0
+		area.collision_mask = 2 # kart bodies, not the road or other pickups
+		area.monitorable = false
 		var shape := SphereShape3D.new()
 		shape.radius = kart_radius
-		cs.shape = shape
-		a.add_child(cs)
-		var mi := MeshInstance3D.new()
-		var pm := PlaneMesh.new()
-		pm.size = Vector2(2.2, 2.2)
-		mi.mesh = pm
-		mi.material_override = mat
-		mi.rotation_degrees = Vector3(-90, 0, 0)
-		a.add_child(mi)
-		a.position = s.position + Vector3.UP * float(spot["height"])
-		add_child(a)
-		s.area = a
-		_spots.append(s)
-
+		var collider := CollisionShape3D.new()
+		collider.shape = shape
+		area.add_child(collider)
+		var visual := MeshInstance3D.new()
+		var mesh := BoxMesh.new() # Explicit engineering placeholder.
+		mesh.size = Vector3.ONE * 1.7
+		visual.mesh = mesh
+		visual.material_override = material
+		area.add_child(visual)
+		area.position = spot.position + Vector3.UP * float(data["height"])
+		spot.area = area
+		_spots.append(spot)
+		area.body_entered.connect(func(body: Node3D): collect(area, body))
+		add_child(area)
 
 func spot_count() -> int:
 	return _spots.size()
 
-
-func _process(delta: float) -> void:
-	for s in _spots:
-		if s.respawn_time <= 0.0:
-			continue
-		if s.timer > 0.0:
-			s.timer -= delta
-			if s.timer <= 0.0:
-				s.timer = 0.0
-				s.held = ""
-				s.held_effect = Effect.NONE
-				s.area.visible = true
-
-
-## Called by the kart when it drives into a box.
-func collect(area: Area3D, kart: Node3D) -> void:
-	var s := _find(area)
-	if s == null or s.held != "":
+func _physics_process(delta: float) -> void:
+	if not enabled:
 		return
-	var roll := _roll(s.box_id)
-	s.held = roll["id"]
-	s.held_effect = roll["effect"]
-	s.held_ratio = roll["ratio"]
-	s.held_duration = roll["duration"]
-	if s.respawn_time > 0.0:
-		s.timer = s.respawn_time
-	s.area.visible = false
-	kart_picked_up.emit(kart, s.held, s.held_effect)
+	for spot in _spots:
+		if spot.available or spot.respawn_time <= 0.0:
+			continue
+		spot.timer = maxf(spot.timer - delta, 0.0)
+		if spot.timer == 0.0:
+			spot.available = true
+			spot.area.visible = true
+			# A stationary kart present at respawn is a real overlap too.
+			for body in spot.area.get_overlapping_bodies():
+				collect(spot.area, body)
 
+func collect(area: Area3D, body: Node3D) -> bool:
+	if not enabled or not body is Kart or not body.driving_enabled or not body.inventory.is_empty():
+		return false
+	if director != null and (not director._state.has(body) or director.is_kart_finished(body)):
+		return false
+	var spot := _find(area)
+	if spot == null or not spot.available:
+		return false
+	var gap := director.distance_behind_leader(body) if director != null else 0.0
+	var roll := _roll(spot.box_id, body.driver is KartAI, gap)
+	var id := str(roll.get("id", ""))
+	if id.is_empty():
+		push_error("PickupSpawner: unresolved table/usable for " + spot.box_id)
+		return false
+	if not body.inventory.grant(id):
+		# PORT-SIDE: a race cap/cooldown rejection leaves the box intact; it
+		# does not silently reroll, erase the item, or change recovered weights.
+		return false
+	spot.available = false # Synchronous claim prevents same-tick double grants.
+	spot.timer = spot.respawn_time
+	spot.area.visible = false
+	kart_picked_up.emit(body, id, int(roll["effect"]))
+	return true
 
-func _find(a: Area3D) -> Spot:
-	for s in _spots:
-		if s.area == a:
-			return s
+func _find(area: Area3D) -> Spot:
+	for spot in _spots:
+		if spot.area == area:
+			return spot
 	return null
 
-
-## Resolve a box -> table -> weighted usable, all from the recovered database.
-func _roll(box_id: String) -> Dictionary:
+func distribution(box_id: String, for_ai: bool, gap: float) -> Array:
 	var box := GameDB.lookup(box_id)
-	if box.is_empty():
-		return {"id": "", "effect": Effect.NONE, "ratio": 1.0, "duration": 0.0}
-	var table_id := str(box.get("_playerTable", ""))
-	var table := GameDB.lookup(table_id)
-	if table.is_empty():
-		return {"id": "", "effect": Effect.NONE, "ratio": 1.0, "duration": 0.0}
+	var table := GameDB.lookup(str(box.get("_aiTable" if for_ai else "_playerTable", "")))
+	var bands: Array = table.get("_pickupDistributions", [])
+	if bands.is_empty():
+		return []
+	var ordered := bands.duplicate()
+	ordered.sort_custom(func(a, b): return float(a["MaxDistanceOrPosition"]) < float(b["MaxDistanceOrPosition"]))
+	for band in ordered:
+		if gap <= float(band["MaxDistanceOrPosition"]):
+			return band["Distribution"]
+	return ordered[-1]["Distribution"]
 
-	var entries: Array = table.get("_pickupDistributions", [])
-	if entries.is_empty():
-		return {"id": "", "effect": Effect.NONE, "ratio": 1.0, "duration": 0.0}
-	# One distribution per distance band; the default band is the one with no
-	# max distance set, which is the general case for a race box.
-	var dist: Dictionary = entries[0]
-	for e in entries:
-		if int(e.get("MaxDistanceOrPosition", -1)) <= 0:
-			dist = e
-			break
+func _roll(box_id: String, for_ai: bool = false, gap: float = 0.0) -> Dictionary:
+	return _describe(weighted_id(distribution(box_id, for_ai, gap), rng.randf()))
 
-	var items: Array = dist.get("Distribution", [])
-	if items.is_empty():
-		return {"id": "", "effect": Effect.NONE, "ratio": 1.0, "duration": 0.0}
+static func weighted_id(entries: Array, fraction: float) -> String:
+	if not is_finite(fraction):
+		return ""
 	var total := 0.0
-	for it in items:
-		total += maxf(float(it.get("Weightage", 0.0)), 0.0)
+	for entry in entries:
+		total += maxf(float(entry.get("Weightage", 0)), 0.0)
 	if total <= 0.0:
-		return {"id": "", "effect": Effect.NONE, "ratio": 1.0, "duration": 0.0}
+		return ""
+	var target := clampf(fraction, 0.0, 0.999999999) * total
+	for entry in entries:
+		var weight := maxf(float(entry.get("Weightage", 0)), 0.0)
+		if weight <= 0.0:
+			continue
+		if target < weight:
+			return str(entry.get("ID", ""))
+		target -= weight
+	return ""
 
-	# Deterministic roll. A race must not hand the player a different item
-	# distribution between two runs of the same race, or the recovered loot
-	 # table stops meaning anything.
-	var pick := fmod(absf(sin(float(random_seed) + _spots.size()) * 43758.5453), 1.0) * total
-	var chosen: Dictionary = items[0]
-	for it in items:
-		pick -= maxf(float(it.get("Weightage", 0.0)), 0.0)
-		if pick <= 0.0:
-			chosen = it
-			break
-	return _describe(str(chosen.get("ID", "")))
-
-
-## Map a usable id to an effect the port implements, and to the handling
-## numbers that effect uses.
-static func _describe(usable_id: String) -> Dictionary:
-	var lower := usable_id.to_lower()
-	var out := {"id": usable_id, "effect": Effect.NONE, "ratio": 1.0, "duration": 0.0}
-	if lower.begins_with("usable_boost"):
-		out["effect"] = Effect.BOOST
-		out["ratio"] = 1.0
-	elif lower.begins_with("usable_tripleboost"):
-		out["effect"] = Effect.TRIPLE_BOOST
-		out["ratio"] = 1.0
-	elif lower.begins_with("usable_shield"):
-		out["effect"] = Effect.SHIELD
-	elif lower.begins_with("usable_turd") or lower.begins_with("usable_goldenturd"):
-		out["effect"] = Effect.TURD
-	else:
-		# A real usable the port has no behaviour for. Kept visible in the roll
-		# rather than dropped, so the recovered odds stay honest.
-		out["effect"] = Effect.NONE
-	return out
+static func _describe(id: String) -> Dictionary:
+	var data := GameDB.lookup(id)
+	var effect := Effect.NONE
+	if data.has("_boostUsableData"):
+		effect = Effect.TRIPLE_BOOST if int(data["_generalData"]["_numberOfUses"]) > 1 else Effect.BOOST
+	elif data.has("_shieldUsableData"):
+		effect = Effect.SHIELD
+	elif data.has("_superShieldUsableData"):
+		effect = Effect.SUPER_SHIELD
+	elif data.has("_goldenTurdData"):
+		effect = Effect.TURD
+	elif data.has("_projectileData"):
+		effect = Effect.PROJECTILE
+	elif data.has("_satelliteUsableData"):
+		effect = Effect.SATELLITE
+	return {"id": str(data.get("_id", "")), "effect": effect}

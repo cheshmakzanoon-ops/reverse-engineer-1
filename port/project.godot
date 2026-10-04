@@ -1,16 +1,9 @@
-; Engine configuration file for the Warped Kart Racers Android port.
-;
-; Physics here is a direct port of `Atlas.Gameplay.Kart.KartPhysicsHandling`,
-; recovered from `GameAssembly.dylib` + `global-metadata.dat`. Field names are
-; kept identical to the original C# so the two can be diffed against each
-; other -- see docs/RE-FINDINGS.md.
-
 config_version=5
 
 [application]
 
 config/name="Warped Kart Racers (RE port)"
-config/description="Kart physics ported from the recovered IL2CPP metadata."
+config/description="Incomplete engineering reconstruction using recovered data; native parity unverified."
 run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 
@@ -55,4 +48,8 @@ handbrake={
 reset_kart={
 "deadzone": 0.5,
 "events": [Object(InputEventKey,"physical_keycode":82)]
+}
+use_item={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":69), Object(InputEventJoypadButton,"button_index":2)]
 }

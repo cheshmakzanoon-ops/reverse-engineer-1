@@ -5,6 +5,7 @@ class_name KartAI
 extends Node
 
 const GameDB := preload("res://scripts/data/game_db.gd")
+const ITEM_FAMILIES := {"_boostUsableData": "Boost", "_shieldUsableData": "Shield", "_superShieldUsableData": "SuperShield", "_goldenTurdData": "GoldenTurd", "_ricochetData": "Ricochet", "_proximityHomingData": "ProximityHoming", "_placementHomingData": "PlacementHoming", "_satelliteUsableData": "Satellite"}
 var kart: Kart
 var difficulty: String = "Hard"
 var respawn_points: Array = []
@@ -15,9 +16,13 @@ var _stuck_timer: float = 0.0
 var _cfg: Dictionary = {}
 var _desired_speed: float = 22.0 # PORT-SIDE conservative racing speed.
 var _stopped: bool = false
+var _item_timer := 0.0
+var _straight_time := 0.0
+var _item_rng := RandomNumberGenerator.new()
 
 func configure(definition_id: String) -> void:
 	_cfg = GameDB.lookup(definition_id)
+	_item_rng.seed = hash(str(kart.name)) if is_instance_valid(kart) else 20202
 	if _cfg.is_empty():
 		push_error("KartAI: missing recovered definition: " + definition_id)
 		_stopped = true
@@ -51,6 +56,7 @@ func update_command(delta: float) -> void:
 		steer = -atan2(offset.x, offset.z)
 		_desired_speed = 5.0
 	_drive(clampf(steer, -1.0, 1.0))
+	_try_item(delta)
 	_stuck_check(delta)
 
 func _drive(steer: float) -> void:
@@ -123,3 +129,28 @@ func stop() -> void:
 	_stopped = true
 	if is_instance_valid(kart):
 		kart.command.clear()
+
+## Recovered attempt intervals/odds; eligibility policy is PORT-SIDE.
+func _try_item(delta: float) -> void:
+	var parameters: Dictionary = _cfg.get("_kartAiUsablesParameters", {})
+	if parameters.is_empty() or not kart.inventory.can_use() or kart.lost_control:
+		return
+	var data := kart.inventory.definition
+	var family := ""
+	for field in ITEM_FAMILIES:
+		if data.has(field):
+			family = ITEM_FAMILIES[field]
+			break
+	if family.is_empty():
+		return
+	if family == "Boost":
+		var angle := rad_to_deg(kart.global_basis.z.angle_to(_look_ahead_point() - kart.global_position))
+		_straight_time = _straight_time + delta if angle <= float(parameters["BoostLookAheadFOVThreshold"]) else 0.0
+		if _straight_time < float(parameters["BoostTimeWithinThresholdToEnable"]) or kart.is_boosting:
+			return
+	_item_timer += delta
+	if _item_timer < float(parameters.get("TryUse" + family + "Interval", 1.0)):
+		return
+	_item_timer = 0.0
+	if _item_rng.randf() * 100.0 < float(parameters.get(family + "UseChance", 0.0)):
+		kart.command.use_item_requested = true

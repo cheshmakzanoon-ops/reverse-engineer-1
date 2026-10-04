@@ -18,12 +18,21 @@ func check(label: String, value: bool) -> void:
 		failed += 1
 	print("  ", "ok " if value else "FAIL ", label)
 
+func with_items() -> bool:
+	return false
+
 func run() -> void:
 	var race = load("res://scenes/main.tscn").instantiate()
 	race.laps = 3
+	race.items_enabled = with_items()
 	root.add_child(race)
 	await process_frame
 	var director: RaceDirector = race.director
+	# The clean physics baseline has no items. The combat subclass enables
+	# items and allows every AI to finish despite hit-induced time gaps;
+	# production's short DNF grace is exercised separately in race_rules.
+	if with_items():
+		director.finish_grace_seconds = 120.0
 	var player: Kart = race.player
 	var initial_position := player.global_position
 	check("six independent karts registered", director.kart_count() == 6 and race._karts.size() == 6)
@@ -83,6 +92,11 @@ func run() -> void:
 	check("completed race clock is frozen", director.elapsed == final_elapsed)
 	check("finish cannot be emitted twice", finished_events == 1)
 	check("finished kart remains grounded", player.position.distance_to(final_position) < 0.2)
+	if with_items():
+		check("AI actually activates items during full races", race.items.activations > 10)
+		check("item impacts affect karts during full races", race.items.hits > 0)
+		check("projectile allocation stays bounded", race.items.get_child_count() < RaceItems.MAX_PROJECTILES)
+		print("COMBAT: activations=%d hits=%d live_projectiles=%d" % [race.items.activations, race.items.hits, race.items.get_child_count()])
 	print("SIMULATION: frames=%d time=%.3fs course=%.3fm gates=%d laps=%d field=%d" % [simulated_frames, director.elapsed, director._total_length, director._gate_positions.size(), director.lap_count, director.kart_count()])
 	for result in director._results:
 		print("RESULT: %s laps=%d finished=%s time=%.3f" % [result["name"], result["lap"], result["finished"], result["time"]])

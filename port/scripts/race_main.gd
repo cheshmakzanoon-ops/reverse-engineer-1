@@ -16,6 +16,8 @@ const GameDB := preload("res://scripts/data/game_db.gd")
 @export var laps: int = 0
 
 var director: RaceDirector
+@export var items_enabled := true
+var items: RaceItems
 var pickups: PickupSpawner
 var hud: RaceHud
 var touch: TouchControls
@@ -35,6 +37,7 @@ func _ready() -> void:
 	_build_environment()
 	_build_course()
 	_build_field()
+	items.karts.assign(_karts)
 	_build_ui()
 	director.start()
 	_update_driving_state()
@@ -60,6 +63,10 @@ func _update_driving_state() -> void:
 	if director == null:
 		return
 	var enabled := director.is_running and director.countdown <= 0.0
+	if pickups != null:
+		pickups.enabled = enabled and items_enabled
+	if items != null:
+		items.enabled = enabled and items_enabled
 	for kart in _karts:
 		var finished := director.is_kart_finished(kart)
 		kart.set_driving_enabled(enabled and not finished)
@@ -128,7 +135,11 @@ func _build_course() -> void:
 	pickups.name = "Pickups"
 	add_child(pickups)
 	pickups.build(track_id)
-	pickups.kart_picked_up.connect(_on_pickup)
+	pickups.director = director
+	items = RaceItems.new()
+	items.name = "Items"
+	items.director = director
+	add_child(items)
 
 
 func _build_field() -> void:
@@ -148,6 +159,7 @@ func _build_field() -> void:
 		var kart := _spawn_kart(is_player, origin, i, handling if is_player else ai_profile)
 		_karts.append(kart)
 		director.register_kart(kart)
+		kart.item_executor = func(id: String, data: Dictionary): return items.execute(id, data, kart)
 		kart.respawn_requested.connect(_recover_kart)
 		kart.respawned.connect(director.reset_motion)
 		if is_player:
@@ -281,24 +293,6 @@ func _build_ui() -> void:
 	touch.visible = OS.has_feature("mobile")
 	player_driver.touch = touch
 	hud.bind(director, player)
-
-
-func _on_pickup(kart: Node3D, usable_id: String, effect: int) -> void:
-	if not (kart is Kart):
-		return
-	var h: KartPhysicsHandling = kart.handling
-	if h == null:
-		return
-	match effect:
-		PickupSpawner.Effect.BOOST:
-			kart.trigger_boost(h.boost_duration, 1.0)
-		PickupSpawner.Effect.TRIPLE_BOOST:
-			kart.trigger_boost(h.boost_duration * 3.0, 1.0)
-		PickupSpawner.Effect.SHIELD, PickupSpawner.Effect.TURD:
-			# Reserved: the shield and projectile behaviours are recovered as
-			# definitions but have no port logic yet. Collected so the box
-			# disappears and respawns on its recovered timer.
-			pass
 
 
 func _recover_kart(kart: Kart) -> void:

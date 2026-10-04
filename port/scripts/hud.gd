@@ -18,6 +18,8 @@ var _position_label: Label
 var _lap_label: Label
 var _time_label: Label
 var _speed_label: Label
+var _item_label: Label
+var _status_label: Label
 var _drift_bar: ProgressBar
 var _drift_tier: Label
 var _countdown_label: Label
@@ -44,6 +46,8 @@ func _build() -> void:
 	_lap_label.text = "LAP 1/3"
 	_time_label = _mk_label(root, 22, Color(0.85, 0.9, 1.0))
 	_time_label.text = "0:00.000"
+	_item_label = _mk_label(root, 22, Color.WHITE)
+	_status_label = _mk_label(root, 22, Color.WHITE)
 
 	# Speed, bottom right.
 	_speed_label = _mk_label(self, 44, Color(1, 1, 1))
@@ -124,6 +128,10 @@ func _process(_delta: float) -> void:
 	if player != null:
 		_speed_label.text = "%d" % int(absf(player.speed))
 		_update_drift()
+		_item_label.text = player.inventory.display_name()
+		if not player.inventory.last_error.is_empty():
+			_item_label.text += " — " + player.inventory.last_error
+		_status_label.text = "SHIELD" if player.shield_time > 0.0 else ("SPINOUT" if player.lost_control else ("WRONG WAY" if director.is_wrong_way(player) else ""))
 
 	if is_instance_valid(player):
 		_position_label.text = _ordinal(director.position_of(player))

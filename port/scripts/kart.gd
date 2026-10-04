@@ -17,6 +17,17 @@ signal respawn_requested(kart: Kart)
 signal respawned(kart: Kart)
 
 var command := KartCommand.new()
+var inventory := KartInventory.new()
+var item_executor: Callable
+var shield_time := 0.0
+var shield_hits := 0
+var invulnerable_time := 0.0
+var _item_boost_timer := 0.0
+var _item_boost_offset := 0.0
+var _item_boost_acceleration := 1.0
+var _hit_braking := 0.0
+var _slow_time := 0.0
+var _slow_limit := INF
 var driver: Node
 var driving_enabled: bool = true
 
@@ -59,6 +70,7 @@ func _physics_process(delta: float) -> void:
 		_update_speed()
 		_update_camera(delta)
 		return
+	inventory.tick(delta)
 	if is_instance_valid(driver):
 		driver.update_command(delta)
 	_read_input()
@@ -79,6 +91,11 @@ func _read_input() -> void:
 	_throttle = command.throttle
 	if command.consume_reset():
 		request_respawn()
+		_steer_input = 0.0
+		_throttle = 0.0
+		return
+	if command.consume_item() and not lost_control:
+		inventory.activate(item_executor)
 
 
 func set_driving_enabled(value: bool) -> void:
@@ -99,13 +116,55 @@ func request_respawn() -> void:
 
 
 func _tick_timers(delta: float) -> void:
-	if _boost_timer > 0.0:
-		_boost_timer -= delta
-		is_boosting = _boost_timer > 0.0
-	if _lost_control_timer > 0.0:
-		_lost_control_timer -= delta
-		lost_control = _lost_control_timer > 0.0
+	_boost_timer = maxf(_boost_timer - delta, 0.0)
+	_item_boost_timer = maxf(_item_boost_timer - delta, 0.0)
+	is_boosting = _boost_timer > 0.0 or _item_boost_timer > 0.0
+	_lost_control_timer = maxf(_lost_control_timer - delta, 0.0)
+	lost_control = _lost_control_timer > 0.0
+	invulnerable_time = maxf(invulnerable_time - delta, 0.0)
+	shield_time = maxf(shield_time - delta, 0.0)
+	_slow_time = maxf(_slow_time - delta, 0.0)
+	if shield_time == 0.0:
+		shield_hits = 0
+	if lost_control:
+		# PORT-SIDE braking model; spinoutBrakeFactor units are not established.
+		var damping := exp(-_hit_braking * delta)
+		velocity.x *= damping
+		velocity.z *= damping
 
+
+func start_item_boost(data: Dictionary) -> void:
+	_item_boost_timer = maxf(float(data.get("BoostDuration", 0.0)), 0.0)
+	_item_boost_offset = maxf(float(data.get("BoostSpeedOffset", 0.0)), 0.0)
+	_item_boost_acceleration = maxf(float(data.get("BoostAccelerationRatio", 1.0)), 1.0)
+	is_boosting = _item_boost_timer > 0.0 or _boost_timer > 0.0
+	# PORT-SIDE initial impulse; the native force integration is not recovered.
+	velocity += global_basis.z * _item_boost_offset
+
+func start_shield(duration: float, hit_count: int) -> void:
+	shield_time = maxf(duration, 0.0)
+	shield_hits = hit_count
+
+func apply_hit(parameters: Dictionary) -> bool:
+	if not driving_enabled:
+		return false
+	if shield_time > 0.0 and shield_hits != 0:
+		if shield_hits > 0:
+			shield_hits -= 1
+			if shield_hits == 0:
+				shield_time = 0.0
+		return false
+	if invulnerable_time > 0.0:
+		return false
+	_lost_control_timer = maxf(float(parameters.get("_spinDuration", 0.0)), 0.0)
+	invulnerable_time = maxf(float(parameters.get("_spinInvulnPeriod", 0.0)), 0.0)
+	_hit_braking = maxf(float(parameters.get("_spinoutBrakeFactor", 0.0)), 0.0)
+	lost_control = _lost_control_timer > 0.0
+	_release_drift(false)
+	if bool(parameters.get("_isSpeedReductionEffect", false)):
+		_slow_time = maxf(float(parameters.get("_speedReductionDuration", 0.0)), 0.0)
+		_slow_limit = maxf(float(parameters.get("_absoluteReducedSpeedLimit", 0.0)), 0.0)
+	return true
 
 func _update_speed() -> void:
 	# Ground speed along the kart's own forward axis.
@@ -113,10 +172,17 @@ func _update_speed() -> void:
 
 
 func _apply_acceleration(delta: float) -> void:
+	if lost_control:
+		return
 	var forward := global_transform.basis.z
 	var applied := 0.0
 
-	var cap := handling.speed_hard_cap + (handling.boost_speed_offset if is_boosting else 0.0)
+	var boost_offset := handling.boost_speed_offset if _boost_timer > 0.0 else 0.0
+	if _item_boost_timer > 0.0:
+		boost_offset = maxf(boost_offset, _item_boost_offset)
+	var cap := handling.speed_hard_cap + boost_offset
+	if _slow_time > 0.0:
+		cap = minf(cap, _slow_limit)
 	if _throttle > 0.0 and speed < cap:
 		# `_forwardAccelCurve` maps absolute speed -> engine force, and falls
 		# away toward the cap: (0,17.5) (8,13.5) (20,9.34) (30,3.2).
@@ -124,7 +190,8 @@ func _apply_acceleration(delta: float) -> void:
 		if is_boosting:
 			# `_boost` is 0.8 on the default profile -- a multiplier, not an
 			# additive impulse (an additive force would dwarf braking at 21).
-			force *= 1.0 + handling.boost
+			var multiplier := 1.0 + handling.boost if _boost_timer > 0.0 else 1.0
+			force *= maxf(multiplier, _item_boost_acceleration if _item_boost_timer > 0.0 else 1.0)
 		applied = force * _throttle
 		if speed < 0.0:
 			applied = handling.braking * _throttle   # oppose reverse velocity
@@ -307,6 +374,12 @@ func respawn_at(target: Transform3D) -> void:
 	_lost_control_timer = 0.0
 	is_boosting = false
 	_boost_timer = 0.0
+	_item_boost_timer = 0.0
+	shield_time = 0.0
+	shield_hits = 0
+	invulnerable_time = 0.0
+	_slow_time = 0.0
+	inventory.clear_slot()
 	_release_drift(false)
 	command.clear()
 	respawned.emit(self)
