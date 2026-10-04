@@ -1,0 +1,118 @@
+name: private-source-session
+
+# Explicit source/tool changes only. Raw media is never uploaded to GitHub.
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/private-source-session.yml', 'tools/source-session-public.pem']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: private-source-session-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  transfer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Prepare decoder dependencies and test encrypted transfer
+        run: |
+          set -euo pipefail
+          python -m pip install 'gdown==5.2.0' 'cryptography==46.0.4'
+          python -m unittest tests.test_private_source -v
+          sudo apt-get update -qq
+          sudo apt-get install -y 7zip
+          mkdir -p verification/tooling/wheels
+          cp "$(command -v 7zz)" verification/tooling/7zz
+          cp /usr/share/doc/7zip/copyright verification/tooling/7zip-COPYRIGHT
+          python -m pip wheel --wheel-dir verification/tooling/wheels -r tools/content-requirements.txt
+          (cd verification/tooling && sha256sum 7zz wheels/* > SHA256SUMS)
+      - name: Verify original then encrypt to receiving session public key
+        env:
+          SOURCE_DRIVE_ID: '15gzBmVRHNf8PpJAH2Ri0ncDfjnsgdorb'
+        run: |
+          set -euo pipefail
+          python - <<'PYCODE'
+          import os
+          from pathlib import Path
+          from scripts.recover_source import download_original
+          from tools.private_source import seal
+          workspace=Path(os.environ['RUNNER_TEMP'])/'source-private-transfer'
+          workspace.mkdir()
+          source=download_original(os.environ['SOURCE_DRIVE_ID'],workspace)
+          report=seal(source,Path('tools/source-session-public.pem').read_bytes(),Path('verification/transfer'))
+          assert report['parts']==6
+          print(report)
+          PYCODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: private-source-00-${{ github.sha }}
+          path: |
+            verification/transfer/part-00/
+            verification/transfer/manifest.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: private-source-01-${{ github.sha }}
+          path: |
+            verification/transfer/part-01/
+            verification/transfer/manifest.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: private-source-02-${{ github.sha }}
+          path: |
+            verification/transfer/part-02/
+            verification/transfer/manifest.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: private-source-03-${{ github.sha }}
+          path: |
+            verification/transfer/part-03/
+            verification/transfer/manifest.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: private-source-04-${{ github.sha }}
+          path: |
+            verification/transfer/part-04/
+            verification/transfer/manifest.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: private-source-05-${{ github.sha }}
+          path: |
+            verification/transfer/part-05/
+            verification/transfer/manifest.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: offline-decoder-tools-${{ github.sha }}
+          path: verification/tooling/
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - name: Remove original private working copy
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/source-private-transfer"
