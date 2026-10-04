@@ -11,7 +11,7 @@ Godot 4.7.2 headless tests drive six karts through three Arlen Speedway laps,
 188 ordered finite gates per lap, with actual CharacterBody3D motion rather
 than edited lap counters. Tests exercise countdown locking, forward crossing,
 ranking, finish times, automatic fall recovery, results and stopped finishers.
-The current increment passes 338 Godot checks and 13 Python tests locally.
+The current increment passes 338 Godot checks and 26 Python tests locally.
 
 The source snapshot still uses placeholder kart/road visuals and has no
 original audio. Pickup contacts, per-kart inventory, boosts, shields, projectiles, hazards and
@@ -36,6 +36,7 @@ done
 Fixed physics time accelerates simulation; it is **not** an Android 60 FPS
 benchmark. No physical Android device or emulator result is claimed here.
 
+Use [the isolated Android build pipeline](../docs/ANDROID-BUILD.md).
 The local Android export of this revision failed because SDK, export templates
 and editor paths were missing. Historical APKs do not prove a build of this
 source. Release credentials must stay out of Git; public distribution of

@@ -11,12 +11,14 @@ original source-code recovery, emulator, or wrapper around the macOS binary.
 | Recovered definitions | 814 ScriptableObjects represented in the committed data; generated GDScript validated by tests |
 | Track structure | 16 decoded maps, including 12 race routes; generated roads are not imported original track art |
 | Kart/input | Per-kart commands, isolated AI/player input, selected profiles, forward grid heading, HUD binding, touch cancellation and reset state have runtime regressions |
-| Test baseline | 338 Godot checks and 13 Python tests pass in the item increment; import and 360-frame headless boot pass |
+| Test baseline | 338 Godot checks and 26 Python tests pass in the current baseline; import and 360-frame headless boot pass |
 | Full race correctness | Six karts physically complete three Arlen Speedway laps through 188 ordered gates, with and without combat. Pickup contacts, held inventory and item effects have behavioral tests; menu/save flow remains incomplete |
-| Android | Historical prototype export exists in development history; this race revision is not yet Android-built, emulator-tested or physical-device-tested |
+| Android | Isolated export/signature/API gates and CI pipeline added; this source is not yet Android-built, emulator-tested or physical-device-tested |
 | Original art and audio | Not integrated; placeholder geometry and silence are not an acceptable completed vertical slice |
 
-[Item increment evidence](docs/status/2026-10-03-items.md),
+[Android packaging commands](docs/ANDROID-BUILD.md),
+[pipeline evidence](docs/status/2026-10-03-android-pipeline.md),
+[item increment evidence](docs/status/2026-10-03-items.md),
 [race increment evidence and commands](docs/status/2026-10-03-race.md),
 [input evidence](docs/status/2026-10-03-input.md) and
 [the preceding audit](docs/status/2026-10-03-audit.md) supersede historical

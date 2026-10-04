@@ -90,3 +90,9 @@ venv/
 # OS noise
 .DS_Store
 Thumbs.db
+# Private Android signing and local evidence; never commit credentials.
+*.keystore
+*.jks
+*.p12
+/export/
+/verification/

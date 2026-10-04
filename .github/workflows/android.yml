@@ -1,0 +1,86 @@
+name: android-packaging
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: android-packaging-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+      - name: Validate export guards
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Install pinned engine/templates and Android dependencies
+        run: bash scripts/install_android_toolchain.sh "$RUNNER_TEMP/kart-toolchain"
+      - name: Export and verify arm64 APK, test-signed AAB and emulator APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p verification/android
+          tooling="$RUNNER_TEMP/kart-toolchain"
+          for target in debug-apk test-aab emulator-apk; do
+            ext=apk
+            if [[ "$target" == test-aab ]]; then ext=aab; fi
+            python3 scripts/android_build.py --target "$target" \
+              --output "$PWD/verification/android/$target.$ext" \
+              --godot "$tooling/bin/godot" \
+              --templates "$tooling/templates/4.7.2.stable" \
+              --bundletool "$tooling/bundletool.jar" \
+              2>&1 | tee "verification/android/$target.log"
+          done
+          cp "$tooling/bundletool.sha256" verification/android/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-packaging-${{ github.sha }}
+          path: verification/android/
+          if-no-files-found: warn
+          retention-days: 3
+  emulator:
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-packaging-${{ github.sha }}
+          path: android-artifact
+      - name: Enable emulator KVM access
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          arch: x86_64
+          target: google_apis
+          emulator-boot-timeout: 600
+          script: python3 scripts/android_smoke.py --serial emulator-5554 --apk android-artifact/emulator-apk.apk --output emulator-evidence
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: emulator-smoke-${{ github.sha }}
+          path: emulator-evidence/
+          if-no-files-found: warn
+          retention-days: 3
