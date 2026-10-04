@@ -29,10 +29,10 @@ jobs:
           python -m pip install 'gdown==5.2.0' 'cryptography==46.0.4'
           python -m unittest tests.test_private_source -v
           sudo apt-get update -qq
-          sudo apt-get install -y 7zip
+          sudo apt-get install -y 7zip-standalone
           mkdir -p verification/tooling/wheels
           cp "$(command -v 7zz)" verification/tooling/7zz
-          cp /usr/share/doc/7zip/copyright verification/tooling/7zip-COPYRIGHT
+          cp /usr/share/doc/7zip-standalone/copyright verification/tooling/7zip-COPYRIGHT
           python -m pip wheel --wheel-dir verification/tooling/wheels -r tools/content-requirements.txt
           (cd verification/tooling && sha256sum 7zz wheels/* > SHA256SUMS)
       - name: Verify original then encrypt to receiving session public key
