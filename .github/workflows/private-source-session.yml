@@ -31,7 +31,9 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y 7zip-standalone
           mkdir -p verification/tooling/wheels
-          cp "$(command -v 7zz)" verification/tooling/7zz
+          cp /usr/lib/7zip/7zz verification/tooling/7zz
+          file verification/tooling/7zz | grep -F ELF
+          verification/tooling/7zz i > verification/tooling/decoder-info.txt
           cp /usr/share/doc/7zip-standalone/copyright verification/tooling/7zip-COPYRIGHT
           python -m pip wheel --wheel-dir verification/tooling/wheels -r tools/content-requirements.txt
           (cd verification/tooling && sha256sum 7zz wheels/* > SHA256SUMS)
