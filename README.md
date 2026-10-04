@@ -11,7 +11,7 @@ original source-code recovery, emulator, or wrapper around the macOS binary.
 | Recovered definitions | 814 ScriptableObjects represented in the committed data; generated GDScript validated by tests |
 | Track structure | 16 decoded maps, including 12 race routes; generated roads are not imported original track art |
 | Kart/input | Per-kart commands, isolated AI/player input, selected profiles, forward grid heading, HUD binding, touch cancellation and reset state have runtime regressions |
-| Test baseline | 463 Godot checks across 15 suites and 28 Python tests pass locally; import and 360-frame headless boot pass |
+| Test baseline | 483 Godot checks across 16 suites and 74 Python tests pass locally; import and 360-frame headless boot pass |
 | Full race correctness | Six karts physically complete three Arlen Speedway laps through 188 ordered gates, with and without combat. Pickup contacts, held inventory and item effects have behavioral tests; the additional one-lap session integration saves the actual result and restores it in a fresh application instance |
 | Front end / local progress | Title, setup, settings, loading, pause, restart, results, rematch and menus are connected; 70 graphical checks include actual synthetic screen touches, focus loss, two-finger pause and safe-area layout. Two-generation local saves have 32 checks |
 | Android | Template installation is now paired with export. Local attempts stop on missing SDK/templates; the repaired CI job was still queued when checked. No APK/AAB, emulator or physical-device success is claimed for this revision |
@@ -27,6 +27,17 @@ original source-code recovery, emulator, or wrapper around the macOS binary.
 [the preceding audit](docs/status/2026-10-03-audit.md) supersede historical
 completion claims in older documentation. A green parser, scene boot or APK
 export is not evidence of a complete playable race.
+
+## Content-recovery pipeline
+
+The source-gated inventory, definition requirements, supported static/skinned GLB
+conversion and real Godot import validation are implemented and tested with
+authored fixtures. **Original Arlen/Hank/kart art is not recovered by that test.**
+The real DMG and bundle-decoder runtime remain external verification gates.
+See [content recovery commands and limits](docs/CONTENT-RECOVERY.md),
+[the content increment evidence](docs/status/2026-10-04-content-pipeline.md), and
+[the exact unresolved Arlen requirements](docs/status/2026-10-04-arlen-content-requirements.json).
+The original-content and Android status rows above are not promoted to success.
 
 ## What recovery means
 

@@ -8,6 +8,13 @@ logs="${1:-verification}"
 mkdir -p "$logs"
 logs="$(cd "$logs" && pwd)"
 export GODOT_SILENCE_ROOT_WARNING=1
+# Authored test content is generated OUTSIDE the game project, never production art.
+fixture="$(mktemp -d "$logs/content-fixture.XXXXXX")"
+python3 -m tests.content_fixture "$fixture/fixture.glb" > "$fixture/generation.log"
+export KART_CONTENT_GLB="$fixture/fixture.glb"
+python3 scripts/checked_process.py --timeout 120 --require 'PASS:' \
+  --log "$fixture/batch-import.log" -- "$godot" --headless --path port \
+  --script "$PWD/tools/validate_content_import.gd" -- "$fixture" "$fixture/import-report.json"
 for test in port/tests/test_*.gd; do
   name="$(basename "$test" .gd)"
   engine=("$godot" --headless)

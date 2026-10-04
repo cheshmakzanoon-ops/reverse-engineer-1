@@ -11,7 +11,7 @@ Godot 4.7.2 headless tests drive six karts through three Arlen Speedway laps,
 188 ordered finite gates per lap, with actual CharacterBody3D motion rather
 than edited lap counters. Tests exercise countdown locking, forward crossing,
 ranking, finish times, automatic fall recovery, results and stopped finishers.
-The current increment passes 463 Godot checks across 15 suites and 28 Python tests locally.
+The current increment passes 483 Godot checks across 16 suites and 74 Python tests locally.
 
 The source snapshot still uses placeholder kart/road visuals and has no
 original audio. Pickup contacts, per-kart inventory, boosts, shields, projectiles, hazards and
@@ -92,3 +92,11 @@ recovered definitions. Case-insensitive ID resolution is covered by tests.
 Recovery history and commands remain in [RE-FINDINGS](../docs/RE-FINDINGS.md)
 and [RE-SETUP](../docs/RE-SETUP.md). The original DMG remains Git LFS tracked
 and is not modified or bundled into runtime-evidence artifacts.
+
+## Production-content gate
+
+The [content-recovery tooling](../docs/CONTENT-RECOVERY.md) now has an authored
+GLB fixture and actual Godot skin/animation import checks. This is not imported
+Warped Kart Racers art: the scene still uses engineering geometry, and
+`port/recovered/` stays ignored. Apply the explicit coordinate/material and
+unsupported-feature gates before replacing any live race resource.

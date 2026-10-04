@@ -96,3 +96,6 @@ Thumbs.db
 *.p12
 /export/
 /verification/
+
+# Converted original game media remain local until explicitly authorized.
+/port/recovered/

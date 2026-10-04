@@ -25,11 +25,15 @@ jobs:
           set -euo pipefail
           for t in tools/macho_slice.py tools/il2cpp_triage.py tools/unity_defs_to_gdscript.py \
                    tools/dump_definitions.py tools/game_defs_to_gdscript.py \
-                   tools/extract_assets.py tools/build_tracks.py tools/tracks_to_gdscript.py; do
+                   tools/extract_assets.py tools/build_tracks.py tools/tracks_to_gdscript.py \
+                   tools/recover_content.py; do
             python3 -m py_compile "$t"
             python3 "$t" --help > /dev/null
           done
           for script in tools/*.sh; do bash -n "$script"; done
+
+      - name: Source-gated content converter regressions (authored fixtures only)
+        run: python3 -m unittest tests.test_content_pipeline tests.test_content_integrity -v
 
       - name: Generator helpers do not import UnityPy or drift in formatting
         run: |

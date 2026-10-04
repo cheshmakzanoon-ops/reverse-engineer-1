@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Extract Unity AssetBundle content into formats a Godot rebuild can use.
+"""Legacy route/inspection extraction; use --production for validated content.
+
+Production: extract_assets.py SOURCE_DIRECTORY NEW_OUTPUT --production
+The production path uses scoped references and raw typetrees; unsupported
+features remain explicit gates. Legacy output below stays byte-compatible.
+
+Extract Unity AssetBundle content into formats a Godot rebuild can use.
 
 The game ships 221 AssetBundles (844 MB) that hold everything visual: meshes,
 textures, sprites, animation clips, and -- most valuable for a port -- the
@@ -308,12 +314,23 @@ def main(argv=None):
     ap.add_argument("bundle")
     ap.add_argument("out_dir")
     ap.add_argument("--monoscripts")
+    ap.add_argument("--production", action="store_true",
+                    help="use the strict inventory pipeline on an extracted source directory")
     ap.add_argument("--many", action="store_true",
                     help="treat `bundle` as a glob and process every match")
     ap.add_argument("--modes", default="scene,meshes,textures")
     ap.add_argument("--category", default="",
                     help="subdirectory under out_dir for this bundle")
     args = ap.parse_args(argv)
+
+    if args.production:
+        if args.many or args.monoscripts or args.category or args.modes != "scene,meshes,textures":
+            ap.error("--production uses SOURCE_DIRECTORY NEW_OUTPUT without legacy export options")
+        try:
+            from .recover_content import main as content_main
+        except ImportError:
+            from recover_content import main as content_main
+        return content_main(["inventory", args.bundle, args.out_dir])
 
     UnityPy = load_unitypy()
     modes = set(m.strip() for m in args.modes.split(",") if m.strip())

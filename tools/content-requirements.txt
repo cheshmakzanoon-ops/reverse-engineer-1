@@ -1,0 +1,2 @@
+# The adapter refuses other UnityPy versions; update pin + adapter tests together.
+UnityPy==1.25.4
