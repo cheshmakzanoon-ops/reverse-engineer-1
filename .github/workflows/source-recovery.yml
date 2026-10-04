@@ -1,0 +1,63 @@
+name: source-recovery
+
+# Read/parse only. Never execute the macOS game or publish its original media.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/source-recovery.yml'
+      - 'scripts/recover_source.py'
+      - 'tools/content_unity.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+concurrency:
+  group: source-recovery-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  inventory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      # Owner supplied this download for the exact hash-locked source DMG.
+      SOURCE_DRIVE_ID: '15gzBmVRHNf8PpJAH2Ri0ncDfjnsgdorb'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install source decoders
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y 7zip
+          python -m pip install 'gdown==5.2.0' -r tools/content-requirements.txt
+      - name: Test source gates before reading production input
+        run: python -m unittest tests.test_source_recovery tests.test_content_pipeline tests.test_content_integrity -v
+      - name: Download, verify, extract and inventory original
+        run: |
+          python scripts/recover_source.py --drive-id "$SOURCE_DRIVE_ID" \
+            --workspace "$RUNNER_TEMP/kart-original" \
+            --reports "$GITHUB_WORKSPACE/verification/source"
+      - name: Preserve metadata and diagnostics only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-recovery-${{ github.sha }}
+          path: |
+            verification/source/recovery.json
+            verification/source/extracted-files.json
+            verification/source/inventory-summary.json
+            verification/source/catalog-index.json
+            verification/source/extraction.log
+            verification/source/inventory.log
+          if-no-files-found: warn
+          retention-days: 3
+      - name: Remove ephemeral original media
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/kart-original"
