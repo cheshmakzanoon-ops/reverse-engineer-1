@@ -16,6 +16,15 @@ from pathlib import Path
 ERROR = re.compile(r'SCRIPT ERROR:|Parse Error|FATAL EXCEPTION|Fatal signal|ANR in|ERROR:.*(?:res://|Resource|load)', re.I)
 
 
+def resolve_launcher(text: str, package: str) -> str:
+    """Accept one actual component resolved by Android for this installed package."""
+    pattern = re.compile(re.escape(package) + r'/\.?[A-Za-z_$][A-Za-z0-9_$.]*')
+    matches = [line.strip() for line in text.splitlines() if pattern.fullmatch(line.strip())]
+    if len(matches) != 1:
+        raise ValueError('Installed package did not resolve exactly one MAIN/LAUNCHER component')
+    return matches[0]
+
+
 def smoke(adb: str, serial: str, apk: Path, output: Path) -> None:
     if not serial.startswith('emulator-'):
         raise ValueError('This automated smoke only targets an explicitly named emulator')
@@ -32,11 +41,14 @@ def smoke(adb: str, serial: str, apk: Path, output: Path) -> None:
     install = command('install', '-r', str(apk.resolve()))
     if 'Success' not in install:
         raise ValueError('APK install did not report success')
+    launcher = resolve_launcher(command('shell', 'cmd', 'package', 'resolve-activity', '--brief',
+                                        '-a', 'android.intent.action.MAIN',
+                                        '-c', 'android.intent.category.LAUNCHER', '-p', package), package)
     pids = []
     try:
         for cycle in range(3):
             command('shell', 'am', 'force-stop', package)
-            launch = command('shell', 'am', 'start', '-W', '-n', package + '/org.godotengine.godot.GodotApp')
+            launch = command('shell', 'am', 'start', '-W', '-n', launcher)
             if 'Status: ok' not in launch:
                 raise ValueError('Launcher failed: ' + launch)
             time.sleep(6)
@@ -46,7 +58,7 @@ def smoke(adb: str, serial: str, apk: Path, output: Path) -> None:
             pids.append(pid)
             command('shell', 'input', 'keyevent', 'KEYCODE_HOME')
             time.sleep(1)
-            command('shell', 'am', 'start', '-W', '-n', package + '/org.godotengine.godot.GodotApp')
+            command('shell', 'am', 'start', '-W', '-n', launcher)
             time.sleep(2)
             if command('shell', 'pidof', package).strip() != pid:
                 raise ValueError('Game process died during background/resume')
@@ -58,7 +70,7 @@ def smoke(adb: str, serial: str, apk: Path, output: Path) -> None:
         (output / 'logcat.txt').write_text(logs)
         if ERROR.search(logs):
             raise ValueError('Android or Godot errors found in smoke logcat')
-        report = {'status': 'emulator-launch-smoke-passed', 'sha256': hashlib.sha256(apk.read_bytes()).hexdigest(), 'serial': serial, 'api': command('shell', 'getprop', 'ro.build.version.sdk').strip(), 'abi': command('shell', 'getprop', 'ro.product.cpu.abi').strip(), 'launches': 3, 'processes': pids, 'physical_device_tested': False, 'full_race_tested': False}
+        report = {'status': 'emulator-launch-smoke-passed', 'sha256': hashlib.sha256(apk.read_bytes()).hexdigest(), 'serial': serial, 'api': command('shell', 'getprop', 'ro.build.version.sdk').strip(), 'abi': command('shell', 'getprop', 'ro.product.cpu.abi').strip(), 'launches': 3, 'launcher': launcher, 'processes': pids, 'physical_device_tested': False, 'full_race_tested': False}
         (output / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
         print(json.dumps(report, indent=2))
     finally:
