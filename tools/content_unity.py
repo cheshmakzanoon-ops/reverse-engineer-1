@@ -5,6 +5,7 @@ A catalog never implies that every object's content can be rendered by Godot.
 """
 from __future__ import annotations
 import base64
+from contextlib import nullcontext
 import importlib.metadata
 import json
 import os
@@ -76,7 +77,8 @@ def decode_mesh(obj) -> dict:
 
 
 def read_bundle(root: Path, source: dict, output: Path, *, loader: Callable | None = None,
-                mesh_decoder: Callable | None = None, progress: Callable | None = None) -> dict:
+                mesh_decoder: Callable | None = None, progress: Callable | None = None,
+                journal_recipe: dict | None = None) -> dict:
     """Decode one source bundle without resolving cross-bundle edges yet.
 
     Its receipt is only intermediate recovery data, never an assembled catalog.
@@ -114,44 +116,66 @@ def read_bundle(root: Path, source: dict, output: Path, *, loader: Callable | No
                       'externals': [e.path for e in sf.externals],
                       'external_metadata': [{'path': e.path, 'guid': encode_tree(getattr(e, 'guid', None)),
                                              'type': getattr(e, 'type', None)} for e in sf.externals]})
-    for obj in sorted(readers, key=lambda o: (o.assets_file.name, o.path_id)):
-        fk = source['path']+'/'+obj.assets_file.name
-        identity = object_id(fk, obj.path_id)
-        record = {'id': identity, 'file': fk, 'path_id': str(obj.path_id), 'type': obj.type.name,
-                  'name': '', 'artifacts': [], 'references': [], 'errors': [], 'conversion': 'raw-only'}
+    ordered = sorted(readers, key=lambda o: (o.assets_file.name, o.path_id))
+    layout = [{'id': object_id(source['path']+'/'+o.assets_file.name, o.path_id),
+               'file': source['path']+'/'+o.assets_file.name, 'path_id': str(o.path_id),
+               'type': o.type.name} for o in ordered]
+    if len({item['id'] for item in layout}) != len(layout):
+        raise ContentError('Duplicate object identity in bundle')
+    if journal_recipe is not None:
         try:
-            note('raw-object', obj)
-            record['artifacts'].append(_artifact(output, f'objects/{identity}.bin', obj.get_raw_data(), 'raw-object'))
-            note('typetree', obj)
-            tree = _parse(obj)
-            record['name'] = tree.get('m_Name', '') if isinstance(tree.get('m_Name', ''), str) else ''
-            record['artifacts'].append(_artifact(output, f'objects/{identity}.json', canonical(encode_tree(tree)), 'typetree'))
-        except Exception as error:
-            record['errors'].append({'field': '', 'reason': 'decode: '+type(error).__name__+': '+str(error)})
+            from .content_objects import ObjectJournal
+        except ImportError:
+            from tools.content_objects import ObjectJournal
+        context = ObjectJournal(output, source, files, layout, journal_recipe)
+    else:
+        context = nullcontext(None)
+    with context as journal:
+        for ordinal, obj in enumerate(ordered):
+            if journal is not None and ordinal < len(journal.records):
+                objects.append(journal.records[ordinal])
+                note('reused', obj)
+                continue
+            if journal is not None: journal.prepare(ordinal)
+            fk = source['path']+'/'+obj.assets_file.name
+            identity = object_id(fk, obj.path_id)
+            record = {'id': identity, 'file': fk, 'path_id': str(obj.path_id), 'type': obj.type.name,
+                      'name': '', 'artifacts': [], 'references': [], 'errors': [], 'conversion': 'raw-only'}
+            try:
+                note('raw-object', obj)
+                record['artifacts'].append(_artifact(output, f'objects/{identity}.bin', obj.get_raw_data(), 'raw-object'))
+                note('typetree', obj)
+                tree = _parse(obj)
+                record['name'] = tree.get('m_Name', '') if isinstance(tree.get('m_Name', ''), str) else ''
+                record['artifacts'].append(_artifact(output, f'objects/{identity}.json', canonical(encode_tree(tree)), 'typetree'))
+            except Exception as error:
+                record['errors'].append({'field': '', 'reason': 'decode: '+type(error).__name__+': '+str(error)})
+                if journal is not None: journal.commit(record)
+                objects.append(record)
+                continue
+            if obj.type.name == 'Mesh':
+                try:
+                    note('mesh', obj)
+                    record['artifacts'].append(_artifact(output, f'meshes/{identity}.json',
+                                                         canonical(encode_tree(decoder(obj))), 'decoded-mesh'))
+                    record['conversion'] = 'decoded-mesh-not-assembled'
+                except Exception as error:
+                    record['errors'].append({'field': '', 'reason': 'mesh: '+str(error)})
+            elif obj.type.name in ('Texture2D', 'Sprite'):
+                try:
+                    import io
+                    note('image', obj)
+                    image = obj.parse_as_object().image
+                    if image is None or min(image.size) < 1:
+                        raise ContentError('Empty decoded image')
+                    buf = io.BytesIO()
+                    image.convert('RGBA').save(buf, format='PNG', compress_level=9)
+                    record['artifacts'].append(_artifact(output, f'images/{identity}.png', buf.getvalue(), 'decoded-image'))
+                    record['conversion'] = 'decoded-image-not-bound'
+                except Exception as error:
+                    record['errors'].append({'field': '', 'reason': 'image: '+str(error)})
+            if journal is not None: journal.commit(record)
             objects.append(record)
-            continue
-        if obj.type.name == 'Mesh':
-            try:
-                note('mesh', obj)
-                record['artifacts'].append(_artifact(output, f'meshes/{identity}.json',
-                                                     canonical(encode_tree(decoder(obj))), 'decoded-mesh'))
-                record['conversion'] = 'decoded-mesh-not-assembled'
-            except Exception as error:
-                record['errors'].append({'field': '', 'reason': 'mesh: '+str(error)})
-        elif obj.type.name in ('Texture2D', 'Sprite'):
-            try:
-                import io
-                note('image', obj)
-                image = obj.parse_as_object().image
-                if image is None or min(image.size) < 1:
-                    raise ContentError('Empty decoded image')
-                buf = io.BytesIO()
-                image.convert('RGBA').save(buf, format='PNG', compress_level=9)
-                record['artifacts'].append(_artifact(output, f'images/{identity}.png', buf.getvalue(), 'decoded-image'))
-                record['conversion'] = 'decoded-image-not-bound'
-            except Exception as error:
-                record['errors'].append({'field': '', 'reason': 'image: '+str(error)})
-        objects.append(record)
     note('decoded')
     verify_source(path, expected_sha256=source['sha256'], expected_size=source['bytes'])
     return {'files': files, 'objects': objects, 'errors': errors}

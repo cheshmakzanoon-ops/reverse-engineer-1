@@ -11,7 +11,7 @@ original source-code recovery, emulator, or wrapper around the macOS binary.
 | Recovered definitions | 814 ScriptableObjects represented in the committed data; generated GDScript validated by tests |
 | Track structure | 16 decoded maps, including 12 race routes; generated roads are not imported original track art |
 | Kart/input | Per-kart commands, isolated AI/player input, selected profiles, forward grid heading, HUD binding, touch cancellation and reset state have runtime regressions |
-| Test baseline | 483 Godot checks across 16 suites and 146 Python tests pass locally; import and 360-frame headless boot pass |
+| Test baseline | 483 Godot checks across 16 suites and 176 Python tests pass locally; import and 360-frame headless boot pass |
 | Full race correctness | Six karts physically complete three Arlen Speedway laps through 188 ordered gates, with and without combat. Pickup contacts, held inventory and item effects have behavioral tests; the additional one-lap session integration saves the actual result and restores it in a fresh application instance |
 | Front end / local progress | Title, setup, settings, loading, pause, restart, results, rematch and menus are connected; 70 graphical checks include actual synthetic screen touches, focus loss, two-finger pause and safe-area layout. Two-generation local saves have 32 checks |
 | Android | Template installation is now paired with export. Local attempts stop on missing SDK/templates; the repaired CI job was still queued when checked. No APK/AAB, emulator or physical-device success is claimed for this revision |
@@ -33,7 +33,8 @@ export is not evidence of a complete playable race.
 The source-gated inventory, definition requirements, supported static/skinned GLB
 conversion and real Godot import validation are implemented and tested with
 authored fixtures. **Original Arlen/Hank/kart art is not recovered by that test.**
-The real DMG and bundle-decoder runtime remain external verification gates.
+A later real-source run is documented below; full production catalog completion
+and resource conversion remain separate verification gates.
 See [content recovery commands and limits](docs/CONTENT-RECOVERY.md),
 [the content increment evidence](docs/status/2026-10-04-content-pipeline.md), and
 [the exact unresolved Arlen requirements](docs/status/2026-10-04-arlen-content-requirements.json).
@@ -50,6 +51,22 @@ catalog still requires the existing full reference/integrity gates. See
 The 30 new regression tests are authored-fixture/process tests, **not new
 original-game extraction or art integration evidence**. Private checkpoint
 payloads are not included in public CI artifacts.
+
+## Object-level continuation and encrypted recovery storage
+
+Production workers now reuse hash-verified complete objects within interrupted
+bundles, not just complete bundles. Private checkpoints can be encrypted and
+restored into a fresh compatible workspace. The hosted workflow can retain the
+ciphertext before cleanup and explicitly restore a trusted prior run using an
+owner-held key; it does not silently assume that key is configured.
+
+The exact original DMG is now verified and extracted in the development runtime.
+A deliberate SIGKILL/resume test on the original Smith's Dreamworld bundle reused
+4,575 objects and completed processing of 11,564 records. Its encrypted round trip
+verified 23,224 artifact files. Three original-object decode errors remain recorded;
+this is not a completed catalog, production scene import or recovered C# project.
+See [operation and key requirements](docs/OBJECT-CHECKPOINTS.md) and
+[production evidence and limits](docs/status/2026-10-04-object-resume.md).
 
 ## What recovery means
 

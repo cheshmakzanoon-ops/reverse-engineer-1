@@ -40,7 +40,7 @@ def recipe() -> dict:
     return {'schema': SCHEMA, 'unity': UNITY_VERSION, 'unitypy': UNITYPY_VERSION,
             'python': platform.python_version(), 'code': {
                 name: sha256_file(CODE / name) for name in
-                ('content_batches.py', 'content_unity.py', 'content_pipeline.py')}}
+                ('content_batches.py', 'content_unity.py', 'content_pipeline.py', 'content_objects.py')}}
 
 
 def write_json(path: Path, value: dict, *, durable: bool = True) -> None:
@@ -115,7 +115,7 @@ def run_bounded(command: list[str], log: Path, timeout: float) -> None:
 def safe_cursor(value: dict) -> dict:
     """Only fixed diagnostic fields may cross from a private worker to reports."""
     result = {}
-    if value.get('phase') in ('load', 'raw-object', 'typetree', 'mesh', 'image', 'decoded'):
+    if value.get('phase') in ('load', 'raw-object', 'typetree', 'mesh', 'image', 'decoded', 'reused'):
         result['phase'] = value['phase']
     if type(value.get('objects_done')) is int and value['objects_done'] >= 0:
         result['objects_done'] = value['objects_done']
@@ -288,7 +288,13 @@ def inventory_batched(root: Path, output: Path, checkpoints: Path, *, resume: bo
             key = bundle_key(source)
             if key in state['completed']: continue
             if time.monotonic() >= deadline or (max_bundles is not None and report['attempted_bundles'] >= max_bundles): break
-            attempt = Path(tempfile.mkdtemp(prefix='attempt-', dir=checkpoints))
+            if _processor is not None:
+                attempt = Path(tempfile.mkdtemp(prefix='attempt-', dir=checkpoints))
+            else:
+                # Stable private directory survives a killed worker. Its object
+                # journal binds source, reader layout and exact decoder recipe.
+                attempt = safe_child(checkpoints, 'partials/'+key)
+                attempt.mkdir(parents=True, exist_ok=True)
             write_json(attempt / 'source.json', source)
             report['attempted_bundles'] += 1
             emit('decoding', active_bundle=source['path'])
@@ -296,9 +302,9 @@ def inventory_batched(root: Path, output: Path, checkpoints: Path, *, resume: bo
                 if _processor is not None:
                     result = _processor(root, source, attempt)
                     write_json(attempt / 'batch.json', {'schema': SCHEMA, 'source': source, **result})
-                else:
+                elif not (attempt / 'batch.json').exists():
                     run_bounded(_command('worker', str(root.resolve()), str(attempt.resolve())),
-                                attempt / 'worker.log', min(bundle_timeout, max(0.001, deadline-time.monotonic())))
+                                attempt / ('worker-'+str(time.time_ns())+'.log'), min(bundle_timeout, max(0.001, deadline-time.monotonic())))
                 validate_batch(attempt, source)
                 folder = safe_child(checkpoints, 'bundles/'+key)
                 folder.parent.mkdir(parents=True, exist_ok=True)
@@ -348,7 +354,8 @@ def main(argv=None) -> int:
         if args.command == 'worker':
             source = read_json(args.attempt / 'source.json')
             result = read_bundle(args.root, source, args.attempt,
-                                 progress=lambda value: write_json(args.attempt / 'cursor.json', value, durable=False))
+                                 progress=lambda value: write_json(args.attempt / 'cursor.json', value, durable=False),
+                                 journal_recipe=recipe())
             write_json(args.attempt / 'batch.json', {'schema': SCHEMA, 'source': source, **result})
         else:
             finalize(args.root, args.output, args.checkpoints)

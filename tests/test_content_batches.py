@@ -1,7 +1,9 @@
 """Bounded/restartable inventory tests. Fixtures are not original Unity bundles."""
 from __future__ import annotations
 import json
+import os
 import subprocess
+import signal
 import sys
 import tempfile
 import time
@@ -248,8 +250,26 @@ class ProcessTests(unittest.TestCase):
             root = Path(d); heartbeat = root / 'heartbeat'
             child = "from pathlib import Path; import time; p=Path("+repr(str(heartbeat))+"); " + "\nwhile True: p.write_text(str(time.monotonic())); time.sleep(.05)"
             parent = "import subprocess,sys,time; subprocess.Popen([sys.executable,'-c',"+repr(child)+"]); time.sleep(30)"
-            with self.assertRaises(subprocess.TimeoutExpired):
-                batches.run_bounded([sys.executable, '-c', parent], root / 'child.log', 1.0)
+            # Establish that the grandchild actually started before timing its
+            # termination. Loaded CI hosts can spend >1 second starting Python;
+            # that is unrelated to whether run_bounded kills the process group.
+            real_popen = subprocess.Popen
+            def start_ready(*args, **kwargs):
+                process = real_popen(*args, **kwargs)
+                deadline = time.monotonic() + 10
+                while not heartbeat.exists() and time.monotonic() < deadline:
+                    if process.poll() is not None:
+                        break
+                    time.sleep(.01)
+                if not heartbeat.exists():
+                    try: os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError: pass
+                    process.wait()
+                    self.fail('Grandchild did not start within the fixture startup budget')
+                return process
+            with patch.object(batches.subprocess, 'Popen', side_effect=start_ready):
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    batches.run_bounded([sys.executable, '-c', parent], root / 'child.log', 1.0)
             first = heartbeat.read_text()
             time.sleep(.2)
             self.assertEqual(heartbeat.read_text(), first)

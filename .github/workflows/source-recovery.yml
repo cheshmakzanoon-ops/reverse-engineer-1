@@ -9,14 +9,28 @@ on:
       - 'scripts/recover_source.py'
       - 'tools/content_unity.py'
       - 'tools/content_batches.py'
+      - 'tools/content_objects.py'
+      - 'tools/content_checkpoints.py'
       - 'tools/content_pipeline.py'
       - 'tools/recover_content.py'
       - 'tools/content-requirements.txt'
       - 'tests/test_content_batches.py'
+      - 'tests/test_content_objects.py'
+      - 'tests/test_content_checkpoints.py'
   workflow_dispatch:
+    inputs:
+      checkpoint_run_id:
+        description: 'Optional trusted producer run ID for encrypted checkpoints'
+        required: false
+        type: string
+      checkpoint_artifact:
+        description: 'Exact encrypted-checkpoints artifact name from that run'
+        required: false
+        type: string
 
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: source-recovery-${{ github.ref }}
   cancel-in-progress: true
@@ -35,20 +49,65 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.13.5'
       - name: Install source decoders
         run: |
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y 7zip
-          python -m pip install 'gdown==5.2.0' -r tools/content-requirements.txt
+          python -m pip install 'gdown==5.2.0' 'cryptography==46.0.4' -r tools/content-requirements.txt
       - name: Test source gates before reading production input
-        run: python -m unittest tests.test_source_recovery tests.test_content_pipeline tests.test_content_integrity tests.test_content_batches -v
+        run: python -m unittest tests.test_source_recovery tests.test_content_pipeline tests.test_content_integrity tests.test_content_batches tests.test_content_objects tests.test_content_checkpoints -v
+      - name: Fetch explicitly selected encrypted checkpoints
+        if: ${{ inputs.checkpoint_run_id != '' && inputs.checkpoint_artifact != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.checkpoint_run_id }}
+          name: ${{ inputs.checkpoint_artifact }}
+          path: ${{ runner.temp }}/kart-restored-encrypted
       - name: Download, verify, extract and inventory original
+        env:
+          RESTORE_RUN: ${{ inputs.checkpoint_run_id }}
+          RESTORE_ARTIFACT: ${{ inputs.checkpoint_artifact }}
+          RECOVERY_PRIVATE_KEY: ${{ secrets.RECOVERY_CHECKPOINT_PRIVATE_KEY }}
         run: |
+          set -euo pipefail
+          umask 077
+          args=()
+          key=""
+          trap 'test -z "$key" || rm -f -- "$key"' EXIT
+          if [[ -n "$RESTORE_RUN" || -n "$RESTORE_ARTIFACT" ]]; then
+            [[ "$RESTORE_RUN" =~ ^[0-9]+$ && -n "$RESTORE_ARTIFACT" && -n "$RECOVERY_PRIVATE_KEY" ]] || {
+              echo 'Restore requires a producer run, artifact name and protected receiving-key secret.' >&2
+              exit 1
+            }
+            key="$(mktemp "$RUNNER_TEMP/checkpoint-key.XXXXXX")"
+            printf '%s' "$RECOVERY_PRIVATE_KEY" > "$key"
+            args=(--restore-checkpoints "$RUNNER_TEMP/kart-restored-encrypted" --checkpoint-key "$key")
+          fi
+          unset RECOVERY_PRIVATE_KEY
           python scripts/recover_source.py --drive-id "$SOURCE_DRIVE_ID" \
             --workspace "$RUNNER_TEMP/kart-original" \
-            --reports "$GITHUB_WORKSPACE/verification/source"
+            --reports "$GITHUB_WORKSPACE/verification/source" "${args[@]}"
+      - name: Seal private checkpoints before workspace cleanup
+        if: always()
+        run: |
+          set -euo pipefail
+          checkpoint="$RUNNER_TEMP/kart-original/content-checkpoints"
+          if [[ -f "$checkpoint/state.json" ]]; then
+            python tools/content_checkpoints.py seal "$checkpoint" tools/source-session-public.pem \
+              "$RUNNER_TEMP/kart-encrypted-checkpoints"
+          fi
+      - name: Retain ciphertext only for another recovery run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: encrypted-checkpoints-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/kart-encrypted-checkpoints/
+          if-no-files-found: warn
+          retention-days: 3
+          compression-level: 0
       - name: Preserve metadata and diagnostics only
         if: always()
         uses: actions/upload-artifact@v4
@@ -64,9 +123,8 @@ jobs:
             verification/source/inventory.log
           if-no-files-found: warn
           retention-days: 3
-      # Checkpoint payloads/worker logs contain original content: never upload
-      # them as plaintext. This hosted run keeps progress metadata only; local
-      # --resume requires retaining the private workspace on the same host.
+      # Only ciphertext and the metadata allowlist survive the ephemeral host.
+      # No private key or plaintext checkpoint folder is uploaded.
       - name: Remove ephemeral original media
         if: always()
         run: rm -rf -- "$RUNNER_TEMP/kart-original"

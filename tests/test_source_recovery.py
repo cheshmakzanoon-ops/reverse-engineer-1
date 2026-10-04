@@ -141,6 +141,44 @@ class SourceRecoveryTests(unittest.TestCase):
         self.app()
         self.assertEqual(canonical(r.extracted_manifest(self.root)), canonical(r.extracted_manifest(self.root)))
 
+    def test_restore_options_must_be_paired_before_any_source_read(self):
+        for option in ('--restore-checkpoints', '--checkpoint-key'):
+            workspace = self.root / ('work-' + option[2:])
+            reports = self.root / ('reports-' + option[2:])
+            with self.subTest(option=option), patch.object(r, 'verify_source') as verify:
+                rc = r.main(['--dmg', str(self.root/'missing'), '--workspace', str(workspace),
+                             '--reports', str(reports), option, str(self.root/'missing-key-or-archive')])
+                self.assertEqual(rc, 1)
+                verify.assert_not_called()
+                self.assertFalse(workspace.exists())
+
+    def test_restored_checkpoint_path_reaches_inventory_with_resume(self):
+        content = self.app()
+        workspace = self.root/'new-work'
+        reports = self.root/'new-reports'
+        key = self.root/'key.pem'
+        key.write_bytes(b'fixture-key-never-published')
+        archive = self.root/'encrypted'
+        observed = []
+        def stop_inventory(command, *_args, **_kwargs):
+            observed.append(command)
+            raise ContentError('fixture stops before inventory')
+        with patch.object(r, 'verify_source', return_value={'bytes': 8, 'sha256': 'fixture'}), \
+             patch.object(r, 'extract_original'), patch.object(r, 'find_application', return_value=content), \
+             patch.object(r, 'run', side_effect=stop_inventory), \
+             patch('tools.content_checkpoints.restore_checkpoints') as restore, \
+             patch('tools.content_unity.source_files', return_value=['fixture-source']):
+            rc = r.main(['--dmg', str(self.root/'fixture.dmg'), '--workspace', str(workspace),
+                         '--reports', str(reports), '--restore-checkpoints', str(archive),
+                         '--checkpoint-key', str(key)])
+        self.assertEqual(rc, 1)
+        restore.assert_called_once_with(archive, b'fixture-key-never-published', workspace/'content-checkpoints',
+                                        expected_sources=['fixture-source'])
+        self.assertEqual(len(observed), 1)
+        self.assertIn('--resume', observed[0])
+        self.assertIn(str(workspace/'content-checkpoints'), observed[0])
+        self.assertNotIn('fixture-key-never-published', (reports/'recovery.json').read_text())
+
 
 if __name__ == '__main__':
     unittest.main()

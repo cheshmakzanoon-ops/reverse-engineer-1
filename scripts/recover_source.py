@@ -156,6 +156,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--sevenzip', default=shutil.which('7zz') or shutil.which('7z') or '7zz')
     parser.add_argument('--bundle-timeout', type=float, default=120)
     parser.add_argument('--inventory-budget', type=float, default=1800)
+    parser.add_argument('--restore-checkpoints', type=Path)
+    parser.add_argument('--checkpoint-key', type=Path,
+                        help='Private receiving key file outside Git; required with --restore-checkpoints')
     args = parser.parse_args(argv)
     report = {'schema': 1, 'source_commit': os.environ.get('GITHUB_SHA', 'local'), 'status': 'started',
               'source_verified': False, 'extracted': False, 'inventory_complete': False,
@@ -164,6 +167,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         from tools.content_batches import _positive
         _positive(args.bundle_timeout, 'bundle_timeout'); _positive(args.inventory_budget, 'inventory_budget')
+        if bool(args.restore_checkpoints) != bool(args.checkpoint_key):
+            raise ContentError('--restore-checkpoints and --checkpoint-key must be supplied together')
         prepare_directories(args.workspace, args.reports)
         prepared = True
         original = args.dmg if args.dmg else download_original(args.drive_id, args.workspace)
@@ -181,13 +186,23 @@ def main(argv: list[str] | None = None) -> int:
         (args.reports / 'extracted-files.json').write_bytes(canonical(manifest))
         print('EXTRACTED ' + json.dumps({'files': len(manifest), 'bytes': report['extracted_bytes']}), flush=True)
         catalog_dir = args.workspace / 'content-catalog'
+        checkpoints = args.workspace / 'content-checkpoints'
+        if args.restore_checkpoints:
+            if not args.checkpoint_key:
+                raise ContentError('Restoring checkpoints requires the owner-held private key')
+            from tools.content_checkpoints import restore_checkpoints
+            from tools.content_unity import source_files
+            restore_checkpoints(args.restore_checkpoints, args.checkpoint_key.read_bytes(), checkpoints,
+                                expected_sources=source_files(content / 'Resources/Data'))
         # Child process bounds decoder failure and preserves its diagnostics.
         # The inventory itself keeps raw media OUTSIDE the report directory.
         error = None
         try:
-            run(inventory_command(content, catalog_dir, args.workspace / 'content-checkpoints',
-                                  args.reports / 'inventory-progress.json',
-                                  bundle_timeout=args.bundle_timeout, budget=args.inventory_budget),
+            command = inventory_command(content, catalog_dir, checkpoints,
+                                        args.reports / 'inventory-progress.json',
+                                        bundle_timeout=args.bundle_timeout, budget=args.inventory_budget)
+            if args.restore_checkpoints: command.append('--resume')
+            run(command,
                 args.reports / 'inventory.log', timeout=args.inventory_budget + 600)
         except ContentError as exc:
             error = str(exc)
