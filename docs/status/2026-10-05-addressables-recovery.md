@@ -59,11 +59,14 @@ and all 16 Godot regression suites (**483 checks**, plus the separate one-check
 GLB fixture-import gate). Its Python pass likewise reports 373 tests with the
 one optional engine test skipped before engine installation.
 
-Android packaging run **37390404025** passed export-guard and real-engine template
-checks and was still exporting when this evidence note was prepared. A new APK,
-AAB, emulator result, visible Android frontend, complete phone race or physical
-ARM64-device result is not claimed by this note. Follow that exact run for its
-terminal result; a packaging or launch-only pass is not game-completion evidence.
+Android packaging run **37390404025** subsequently completed successfully at the
+same implementation commit. Package job **112034102198** passed export guards,
+real-engine template installation, and export/verification of the ARM64 debug
+APK, test-signed AAB and emulator APK. Emulator job **112036072686** also passed.
+This is packaging and the existing launch/background/resume smoke test, not
+proof of a visible Android frontend, a complete phone race, original art/audio,
+performance, or physical ARM64-device operation. No Godot gameplay or rendering
+implementation was changed by the Addressables recovery stage.
 
 ## Remaining gates
 
