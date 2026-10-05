@@ -151,6 +151,38 @@ def inventory_command(content: Path, catalog: Path, checkpoints: Path, progress:
             '--continuation-report', str(progress.with_name('inventory-continuation.json'))]
 
 
+def finalization_eligible(progress: dict) -> bool:
+    """Only completed-bundle budget/timeouts may enter the dedicated finalizer.
+
+    A decoder/integrity failure, partial bundle set or finalized-but-incomplete
+    catalog remains terminal. The finalizer independently verifies all receipts.
+    """
+    if not isinstance(progress, dict):
+        return False
+    total = progress.get('total_bundles')
+    completed = progress.get('completed_bundles')
+    failures = progress.get('failures')
+    return (progress.get('schema') == 1 and progress.get('status') == 'incomplete'
+            and progress.get('phase') == 'awaiting-finalization'
+            and type(total) is int and total > 0 and type(completed) is int
+            and completed == total and isinstance(failures, list)
+            and all(isinstance(f, dict) and f.get('phase') == 'finalizing'
+                    and f.get('reason') in ('timeout', 'TimeoutExpired') for f in failures))
+
+
+def finalization_command(content: Path, catalog: Path, checkpoints: Path,
+                         workspace: Path, progress: Path, *, budget: float) -> list[str]:
+    from tools.content_batches import _positive
+    _positive(budget, 'finalization budget')
+    command = [sys.executable, str(ROOT / 'tools/content_finalize.py'),
+               str(content / 'Resources/Data'), str(catalog), '--checkpoints', str(checkpoints),
+               '--workspace', str(workspace), '--budget', str(budget),
+               '--progress-report', str(progress)]
+    if workspace.exists():
+        command.append('--resume')
+    return command
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group(required=True)
@@ -164,6 +196,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--inventory-pass-budget', type=float, default=900)
     parser.add_argument('--inventory-max-passes', type=int, default=8)
     parser.add_argument('--max-bundle-timeout', type=float, default=480)
+    parser.add_argument('--finalization-budget', type=float, default=1800,
+                        help='Separate bounded catalog-finalization budget after every bundle is sealed')
     parser.add_argument('--restore-checkpoints', type=Path)
     parser.add_argument('--checkpoint-key', type=Path,
                         help='Private receiving key file outside Git; required with --restore-checkpoints')
@@ -177,6 +211,8 @@ def main(argv: list[str] | None = None) -> int:
         validate_policy(budget=args.inventory_budget, pass_budget=args.inventory_pass_budget,
                         bundle_timeout=args.bundle_timeout, max_bundle_timeout=args.max_bundle_timeout,
                         max_passes=args.inventory_max_passes, stall_limit=2)
+        from tools.content_batches import _positive
+        _positive(args.finalization_budget, 'finalization budget')
         if bool(args.restore_checkpoints) != bool(args.checkpoint_key):
             raise ContentError('--restore-checkpoints and --checkpoint-key must be supplied together')
         prepare_directories(args.workspace, args.reports)
@@ -224,6 +260,24 @@ def main(argv: list[str] | None = None) -> int:
         continuation_path = args.reports / 'inventory-continuation.json'
         if continuation_path.is_file():
             report['inventory_continuation'] = json.loads(continuation_path.read_text())
+        # Decoding all original bundles exhausted the historical shared budget.
+        # Do not re-decode them or mistake this boundary for a corrupt asset.
+        # This separate process retains copies/edge chunks, uses its own budget,
+        # and still invokes the unchanged full catalog validator before publish.
+        if finalization_eligible(report.get('inventory_progress')):
+            report['inventory_stage_error'] = error
+            try:
+                run(finalization_command(content, catalog_dir, checkpoints,
+                                         args.workspace / 'content-finalization',
+                                         args.reports / 'finalization-progress.json',
+                                         budget=args.finalization_budget),
+                    args.reports / 'finalization.log', timeout=args.finalization_budget + 120)
+                error = None
+            except ContentError as exc:
+                error = str(exc)
+            final_progress = args.reports / 'finalization-progress.json'
+            if final_progress.is_file():
+                report['finalization_progress'] = json.loads(final_progress.read_text())
         catalog_file = catalog_dir / 'catalog.json'
         if catalog_file.is_file():
             catalog = json.loads(catalog_file.read_text())

@@ -11,6 +11,7 @@ on:
       - 'tools/content_textures.py'
       - 'tools/content_batches.py'
       - 'tools/content_continuation.py'
+      - 'tools/content_finalize.py'
       - 'tools/content_objects.py'
       - 'tools/content_checkpoints.py'
       - 'tools/content_pipeline.py'
@@ -18,6 +19,8 @@ on:
       - 'tools/content-requirements.txt'
       - 'tests/test_content_batches.py'
       - 'tests/test_content_continuation.py'
+      - 'tests/test_content_finalize.py'
+      - 'tests/test_source_finalization.py'
       - 'tests/test_content_objects.py'
       - 'tests/test_content_numeric.py'
       - 'tests/test_content_textures.py'
@@ -44,7 +47,7 @@ concurrency:
 jobs:
   inventory:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 120
     env:
       # Owner supplied this download for the exact hash-locked source DMG.
       SOURCE_DRIVE_ID: '15gzBmVRHNf8PpJAH2Ri0ncDfjnsgdorb'
@@ -63,7 +66,7 @@ jobs:
           sudo apt-get install -y 7zip
           python -m pip install 'gdown==5.2.0' 'cryptography==46.0.4' -r tools/content-requirements.txt
       - name: Test source gates before reading production input
-        run: python -m unittest tests.test_source_recovery tests.test_content_pipeline tests.test_content_integrity tests.test_content_batches tests.test_content_continuation tests.test_content_objects tests.test_content_checkpoints tests.test_content_numeric tests.test_content_textures tests.test_font_atlas_evidence -v
+        run: python -m unittest tests.test_source_recovery tests.test_content_pipeline tests.test_content_integrity tests.test_content_batches tests.test_content_continuation tests.test_content_finalize tests.test_source_finalization tests.test_content_objects tests.test_content_checkpoints tests.test_content_numeric tests.test_content_textures tests.test_font_atlas_evidence -v
       - name: Fetch explicitly selected encrypted checkpoints
         if: ${{ inputs.checkpoint_run_id != '' && inputs.checkpoint_artifact != '' }}
         uses: actions/download-artifact@v4
@@ -97,6 +100,7 @@ jobs:
             --workspace "$RUNNER_TEMP/kart-original" \
             --inventory-budget 3600 --inventory-pass-budget 900 \
             --inventory-max-passes 8 --bundle-timeout 120 --max-bundle-timeout 480 \
+            --finalization-budget 1800 \
             --reports "$GITHUB_WORKSPACE/verification/source" "${args[@]}"
       - name: Seal private checkpoints before workspace cleanup
         if: always()
@@ -127,6 +131,8 @@ jobs:
             verification/source/inventory-summary.json
             verification/source/inventory-progress.json
             verification/source/inventory-continuation.json
+            verification/source/finalization-progress.json
+            verification/source/finalization.log
             verification/source/catalog-index.json
             verification/source/extraction.log
             verification/source/inventory.log
