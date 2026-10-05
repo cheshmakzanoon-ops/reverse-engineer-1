@@ -11,7 +11,7 @@ original source-code recovery, emulator, or wrapper around the macOS binary.
 | Recovered definitions | 814 ScriptableObjects represented in the committed data; generated GDScript validated by tests |
 | Track structure | 16 decoded maps, including 12 race routes; generated roads are not imported original track art |
 | Kart/input | Per-kart commands, isolated AI/player input, selected profiles, forward grid heading, HUD binding, touch cancellation and reset state have runtime regressions |
-| Test baseline | 483 Godot checks across 16 suites and 228 Python tests pass locally; import and 360-frame headless boot pass |
+| Test baseline | 483 Godot checks across 16 suites and 275 Python tests pass locally; import and 360-frame headless boot pass |
 | Full race correctness | Six karts physically complete three Arlen Speedway laps through 188 ordered gates, with and without combat. Pickup contacts, held inventory and item effects have behavioral tests; the additional one-lap session integration saves the actual result and restores it in a fresh application instance |
 | Front end / local progress | Title, setup, settings, loading, pause, restart, results, rematch and menus are connected; 70 graphical checks include actual synthetic screen touches, focus loss, two-finger pause and safe-area layout. Two-generation local saves have 32 checks |
 | Android | Earlier CI run `37208484685` at `b89801a` verified an engineering ARM64 debug APK, then failed test-AAB validation; emulator was skipped. This decoder increment adds no new Android export or physical-device result |
@@ -96,6 +96,21 @@ check for the six original font-atlas records. This is not font rendering, origi
 art integration, complete source recovery or Android verification. See
 [format rules and source-check commands](docs/EMPTY-FONT-ATLASES.md) and
 [current validation evidence](docs/status/2026-10-05-empty-font-atlases.md).
+
+## Same-job recovery continuation and AAB validation
+
+The source runner now retries timeout/budget pauses in the same private workspace,
+with a shared total budget, capped worker backoff, pass limits and retained
+metadata history. It does not change the decoder recipe or weaken source/object
+validation. Original-data completion still requires a successful production run.
+See [continuation commands](docs/INVENTORY-CONTINUATION.md).
+
+Android bundle validation now recognizes the Godot project in an install-time
+asset pack, verifies the pack's actual delivery manifest, and explicitly signs an
+unsigned AAB with the selected identity before cryptographic validation. A copy
+of the historical AAB passed structural/JDK-signing checks with 188 unchanged
+payload entries; that is not a new export, bundletool or device result.
+See [the increment evidence and limitations](docs/status/2026-10-05-continuation-and-aab.md).
 
 ## What recovery means
 

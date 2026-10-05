@@ -33,7 +33,7 @@ jobs:
           for script in tools/*.sh; do bash -n "$script"; done
 
       - name: Source-gated content converter regressions (authored fixtures only)
-        run: python3 -m unittest tests.test_content_pipeline tests.test_content_integrity tests.test_content_batches tests.test_content_objects tests.test_content_numeric tests.test_content_textures tests.test_font_atlas_evidence -v
+        run: python3 -m unittest tests.test_content_pipeline tests.test_content_integrity tests.test_content_batches tests.test_content_continuation tests.test_content_objects tests.test_content_numeric tests.test_content_textures tests.test_font_atlas_evidence -v
 
       - name: Generator helpers do not import UnityPy or drift in formatting
         run: |

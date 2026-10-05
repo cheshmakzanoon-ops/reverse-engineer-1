@@ -106,3 +106,36 @@ A queued job, YAML file or build command is not a successful CI result.
 
 The Godot tutorial still lists API 35 in its generic SDK example; this
 project's target follows the newer explicit Play requirement, not that example.
+
+## AAB project asset packs and explicit signing
+
+A Godot AAB can place `project.binary` in a module such as
+`assetPackInstallTime/assets/`, not `base/assets/`. Structural validation now
+requires exactly one project location, nonempty pack metadata, and the base
+manifest/DEX/native engine. An asset-only project pack may not contain executable
+code. After `bundletool validate`, the actual pack manifest is decoded with
+`bundletool dump manifest --module=<project_module>` and must declare an
+unconditional, fused, install-time asset pack with the expected package and split.
+On-demand and fast-follow placement is not accepted for the startup project.
+
+An unsigned AAB is signed explicitly with the already selected debug or
+owner-controlled release identity. Passwords are passed to JDK `jarsigner` through
+environment variable names, not command-line literals. Existing signatures are
+not silently replaced. Partial or unsupported signing records fail; signature
+presence alone does not pass the cryptographic verification that follows. No
+release identity is generated and release signing never falls back to debug.
+The success sidecar is written only after signing, bundletool and manifest gates.
+
+The historical test AAB from workflow `37308162586` exposed both issues: the
+project existed in `assetPackInstallTime`, and the export had no JAR-signing
+records. A local copy was test-signed and its 188 original entries were verified
+unchanged. That recheck is not a new project export, bundletool validation, Play
+acceptance or device test. See the current increment report for exact evidence.
+
+Primary references (consulted 2026-10-05):
+- Android asset-pack layout and install-time access:
+  https://developer.android.com/guide/playcore/asset-delivery/integrate-java
+- Command-line Android bundle building and signing:
+  https://developer.android.com/build/building-cmdline
+- Bundletool validation and APK generation:
+  https://developer.android.com/tools/bundletool

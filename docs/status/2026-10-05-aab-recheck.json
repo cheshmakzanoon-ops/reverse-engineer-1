@@ -1,0 +1,20 @@
+{
+  "source_commit": "eea54a499d53cb391bb81732ff755c8a5c32a0d8",
+  "source_workflow": 37308162586,
+  "artifact_id": 11344906626,
+  "archive_sha256": "60e0545938afd1809d15b3623f8b0ec3e830b1d5a228b9224004e66eec3f3ab0",
+  "aab_sha256_before": "13723e812280417bd9f450c4124426639c8c495385dfda327e50986732a211e8",
+  "scope": "Historical Godot AAB structure/signing recheck; not a new Android export",
+  "new_android_export": false,
+  "bundletool_verified": false,
+  "emulator_tested": false,
+  "physical_device_tested": false,
+  "complete_game": false,
+  "project_module": "assetPackInstallTime",
+  "unsigned_rejected_before": "AAB has no RSA JAR-signing records; cryptographic verification must follow",
+  "unchanged_payload_entries": 188,
+  "structure_verified": true,
+  "jar_signature_verified": true,
+  "test_signed": true,
+  "aab_sha256_after": "db77a0896dbb21a6e0fef57e41e44dd4568f23767dd7df852a66357af353d982"
+}

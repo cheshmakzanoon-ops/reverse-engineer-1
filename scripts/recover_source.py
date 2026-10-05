@@ -136,14 +136,19 @@ def inventory_summary(catalog: dict) -> dict:
 
 
 def inventory_command(content: Path, catalog: Path, checkpoints: Path, progress: Path,
-                      *, bundle_timeout: float, budget: float) -> list[str]:
+                      *, bundle_timeout: float, budget: float, pass_budget: float = 900,
+                      max_passes: int = 8, max_bundle_timeout: float = 480) -> list[str]:
     """Metadata-only report lives outside private batch payloads and worker logs."""
-    from tools.content_batches import _positive
-    _positive(bundle_timeout, 'bundle_timeout'); _positive(budget, 'inventory_budget')
+    from tools.content_continuation import validate_policy
+    validate_policy(budget=budget, pass_budget=pass_budget, bundle_timeout=bundle_timeout,
+                    max_bundle_timeout=max_bundle_timeout, max_passes=max_passes, stall_limit=2)
     return [sys.executable, str(ROOT / 'tools/recover_content.py'), 'inventory',
             str(content / 'Resources/Data'), str(catalog), '--checkpoints', str(checkpoints),
             '--bundle-timeout', str(bundle_timeout), '--budget', str(budget),
-            '--progress-report', str(progress)]
+            '--progress-report', str(progress), '--continue-until-complete',
+            '--pass-budget', str(pass_budget), '--max-passes', str(max_passes),
+            '--max-bundle-timeout', str(max_bundle_timeout),
+            '--continuation-report', str(progress.with_name('inventory-continuation.json'))]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -155,7 +160,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--reports', type=Path, required=True)
     parser.add_argument('--sevenzip', default=shutil.which('7zz') or shutil.which('7z') or '7zz')
     parser.add_argument('--bundle-timeout', type=float, default=120)
-    parser.add_argument('--inventory-budget', type=float, default=1800)
+    parser.add_argument('--inventory-budget', type=float, default=3600)
+    parser.add_argument('--inventory-pass-budget', type=float, default=900)
+    parser.add_argument('--inventory-max-passes', type=int, default=8)
+    parser.add_argument('--max-bundle-timeout', type=float, default=480)
     parser.add_argument('--restore-checkpoints', type=Path)
     parser.add_argument('--checkpoint-key', type=Path,
                         help='Private receiving key file outside Git; required with --restore-checkpoints')
@@ -165,8 +173,10 @@ def main(argv: list[str] | None = None) -> int:
               'original_source_recovered': False, 'godot_imported': False, 'complete_game': False}
     prepared = False
     try:
-        from tools.content_batches import _positive
-        _positive(args.bundle_timeout, 'bundle_timeout'); _positive(args.inventory_budget, 'inventory_budget')
+        from tools.content_continuation import validate_policy
+        validate_policy(budget=args.inventory_budget, pass_budget=args.inventory_pass_budget,
+                        bundle_timeout=args.bundle_timeout, max_bundle_timeout=args.max_bundle_timeout,
+                        max_passes=args.inventory_max_passes, stall_limit=2)
         if bool(args.restore_checkpoints) != bool(args.checkpoint_key):
             raise ContentError('--restore-checkpoints and --checkpoint-key must be supplied together')
         prepare_directories(args.workspace, args.reports)
@@ -200,7 +210,9 @@ def main(argv: list[str] | None = None) -> int:
         try:
             command = inventory_command(content, catalog_dir, checkpoints,
                                         args.reports / 'inventory-progress.json',
-                                        bundle_timeout=args.bundle_timeout, budget=args.inventory_budget)
+                                        bundle_timeout=args.bundle_timeout, budget=args.inventory_budget,
+                                        pass_budget=args.inventory_pass_budget, max_passes=args.inventory_max_passes,
+                                        max_bundle_timeout=args.max_bundle_timeout)
             if args.restore_checkpoints: command.append('--resume')
             run(command,
                 args.reports / 'inventory.log', timeout=args.inventory_budget + 600)
@@ -209,6 +221,9 @@ def main(argv: list[str] | None = None) -> int:
         progress_path = args.reports / 'inventory-progress.json'
         if progress_path.is_file():
             report['inventory_progress'] = json.loads(progress_path.read_text())
+        continuation_path = args.reports / 'inventory-continuation.json'
+        if continuation_path.is_file():
+            report['inventory_continuation'] = json.loads(continuation_path.read_text())
         catalog_file = catalog_dir / 'catalog.json'
         if catalog_file.is_file():
             catalog = json.loads(catalog_file.read_text())

@@ -238,10 +238,28 @@ class ProcessTests(unittest.TestCase):
     def test_actual_child_timeout_preserves_log_and_returns(self):
         with tempfile.TemporaryDirectory() as d:
             log = Path(d) / 'child.log'
-            started = time.monotonic()
-            with self.assertRaises(subprocess.TimeoutExpired):
-                batches.run_bounded([sys.executable, '-u', '-c', 'import time; print("started"); time.sleep(30)'], log, 1.0)
-            self.assertLess(time.monotonic() - started, 5)
+            # Establish actual child readiness before measuring the unchanged
+            # one-second timeout. Slow interpreter startup is not a failed kill.
+            real_popen = subprocess.Popen
+            timed_start = []
+            def start_ready(*args, **kwargs):
+                process = real_popen(*args, **kwargs)
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    if log.exists() and 'started' in log.read_text():
+                        timed_start.append(time.monotonic())
+                        return process
+                    if process.poll() is not None:
+                        break
+                    time.sleep(.01)
+                try: os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError: pass
+                process.wait()
+                self.fail('Child did not announce readiness within its startup budget')
+            with patch.object(batches.subprocess, 'Popen', side_effect=start_ready):
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    batches.run_bounded([sys.executable, '-u', '-c', 'import time; print("started"); time.sleep(30)'], log, 1.0)
+            self.assertLess(time.monotonic() - timed_start[0], 5)
             self.assertIn('started', log.read_text())
 
 

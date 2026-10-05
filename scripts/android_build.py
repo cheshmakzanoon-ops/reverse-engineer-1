@@ -56,7 +56,7 @@ def preflight(sdk: Path, java: Path, templates: Path) -> None:
         raise ValueError("Missing build dependencies:\n" + "\n".join(missing))
 
 
-def validate_archive(path: Path, kind: str, abi: str) -> None:
+def validate_archive(path: Path, kind: str, abi: str, *, require_signature: bool = True) -> str:
     if kind not in ("apk", "aab") or abi not in ("arm64-v8a", "x86_64"):
         raise ValueError("Unsupported archive type or ABI")
     if not zipfile.is_zipfile(path):
@@ -66,17 +66,74 @@ def validate_archive(path: Path, kind: str, abi: str) -> None:
         if len(names) != len(set(names)) or archive.testzip() is not None:
             raise ValueError("Duplicate or corrupt package entries")
         prefix = "base/" if kind == "aab" else ""
-        required = [prefix + "assets/project.binary", prefix + f"lib/{abi}/libgodot_android.so"]
+        if any(name.startswith('/') or '\\' in name or '..' in Path(name).parts for name in names):
+            raise ValueError("Unsafe Android archive member path")
+        project_module = "base"
+        if kind == "aab":
+            projects = [name for name in names if name.endswith("/assets/project.binary")]
+            if len(projects) != 1 or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*/assets/project\.binary", projects[0]):
+                raise ValueError("AAB requires one unambiguous Godot project module")
+            project_module = projects[0].split('/')[0]
+            required = [projects[0], f"base/lib/{abi}/libgodot_android.so"]
+            if project_module != "base":
+                required += [project_module + "/manifest/AndroidManifest.xml", project_module + "/assets.pb"]
+                if any(name.startswith((project_module + '/dex/', project_module + '/lib/')) for name in names):
+                    raise ValueError("Project asset pack must not contain executable code")
+        else:
+            required = ["assets/project.binary", f"lib/{abi}/libgodot_android.so"]
         required += ["BundleConfig.pb", "base/manifest/AndroidManifest.xml", "base/dex/classes.dex"] if kind == "aab" else ["AndroidManifest.xml", "classes.dex"]
         if any(name not in names or archive.getinfo(name).file_size == 0 for name in required):
             raise ValueError("Package is missing nonempty manifest, DEX, engine or Godot project")
         architectures = {name.split("/")[1 + bool(prefix)] for name in names if name.startswith(prefix + "lib/") and name.endswith(".so")}
         if architectures != {abi}:
             raise ValueError("Unexpected packaged ABIs: " + repr(architectures))
-        if kind == "aab":
+        if kind == "aab" and require_signature:
             for suffix in (".SF", ".RSA"):
                 if not any(name.startswith("META-INF/") and name.endswith(suffix) and archive.getinfo(name).file_size > 0 for name in names):
                     raise ValueError("AAB has no RSA JAR-signing records; cryptographic verification must follow")
+        return project_module
+
+
+def validate_asset_pack_manifest(text: str, module: str, package: str) -> None:
+    """The project must be available at launch, not fast-follow or on-demand.
+
+    Structure alone is not enough: build() obtains this XML through bundletool
+    from the same signed AAB, then checks the actual pack delivery declaration.
+    """
+    root = ET.fromstring(text)
+    dist = "{http://schemas.android.com/apk/distribution}"
+    modules = root.findall(dist + "module")
+    if root.tag != "manifest" or root.get("package") != package or root.get("split") != module or len(modules) != 1:
+        raise ValueError("Asset pack manifest identity does not match the project module")
+    pack = modules[0]
+    deliveries = pack.findall(dist + "delivery")
+    fusing = pack.findall(dist + "fusing")
+    if (pack.get(dist + "type") != "asset-pack" or len(deliveries) != 1 or
+            len(list(deliveries[0])) != 1 or list(deliveries[0])[0].tag != dist + "install-time" or
+            len(list(deliveries[0])[0]) != 0 or len(fusing) != 1 or fusing[0].get(dist + "include") != "true"):
+        raise ValueError("Godot project requires an unconditional fused install-time asset pack")
+
+
+def sign_unsigned_bundle(path: Path, java: Path, env: Mapping[str, str], secrets: Sequence[str], *, release: bool) -> None:
+    """Sign an unsigned Godot AAB using the already selected identity only.
+
+    Existing signatures are never replaced. Partial records fail, and full JAR
+    signature verification still follows. Release never falls back to debug.
+    """
+    with zipfile.ZipFile(path) as archive:
+        signatures = [name for name in archive.namelist() if name.startswith("META-INF/") and
+                      name.upper().endswith((".SF", ".RSA", ".EC", ".DSA"))]
+        if signatures:
+            if not any(name.endswith(".SF") for name in signatures) or not any(name.endswith(".RSA") for name in signatures):
+                raise ValueError("AAB has partial or unsupported signing records; refusing to replace them")
+            return
+    prefix = "GODOT_ANDROID_KEYSTORE_" + ("RELEASE" if release else "DEBUG") + "_"
+    if not all(env.get(prefix + field) for field in ("PATH", "USER", "PASSWORD")):
+        raise ValueError("AAB signing requires the selected existing identity; no fallback is allowed")
+    run([java / "bin/jarsigner", "-keystore", env[prefix + "PATH"],
+         "-storepass:env", prefix + "PASSWORD", "-keypass:env", prefix + "PASSWORD",
+         "-digestalg", "SHA-256", "-sigalg", "SHA256withRSA", "-sigfile", "KARTLAB",
+         path, env[prefix + "USER"]], env, secrets, 120)
 
 
 def validate_badging(text: str, package: str, *, require_launcher: bool = True) -> None:
@@ -186,7 +243,10 @@ def build(args: argparse.Namespace) -> dict:
         # standalone --editor/--quit command exits zero without installing it.
         run([args.godot, "--headless", "--path", project, "--install-android-build-template",
              "--export-release" if release else "--export-debug", preset, output], env, secrets)
-        validate_archive(output, kind, abi)
+        project_module = validate_archive(output, kind, abi, require_signature=(kind != "aab"))
+        if kind == "aab":
+            sign_unsigned_bundle(output, java, env, secrets, release=release)
+            validate_archive(output, kind, abi)
         package = PACKAGE if release else PACKAGE + ".test"
         tools = sdk / "build-tools" / BUILD_TOOLS
         if kind == "apk":
@@ -198,13 +258,17 @@ def build(args: argparse.Namespace) -> dict:
             launcher = validate_launcher(manifest)
         else:
             verification = run([java / "bin/jarsigner", "-verify", output], env, secrets, 60)
-            if "jar verified." not in verification.lower():
+            if "jar verified." not in verification.lower() or "unsigned entries" in verification.lower() or "treated as unsigned" in verification.lower():
                 raise ValueError("AAB JAR signature was not verified")
             run([java / "bin/java", "-jar", bundletool, "validate", "--bundle=" + str(output)], env, secrets, 120)
             manifest = run([java / "bin/java", "-jar", bundletool, "dump", "manifest", "--bundle=" + str(output), "--module=base"], env, secrets, 120)
             validate_manifest(manifest, package)
             launcher = validate_launcher(manifest)
-        report = {"status": "packaging-verified", "file": output.name, "bytes": output.stat().st_size, "sha256": hashlib.sha256(output.read_bytes()).hexdigest(), "source_commit": env.get("GITHUB_SHA", "local-source; see source_digest"), "source_digest": project_hash, "godot": version, "package": package, "launcher": launcher, "abi": abi, "min_sdk": 24, "target_sdk": 36, "test_signed": not release, "emulator_tested": False, "physical_device_tested": False, "complete_game": False}
+            if project_module != "base":
+                pack_manifest = run([java / "bin/java", "-jar", bundletool, "dump", "manifest",
+                                     "--bundle=" + str(output), "--module=" + project_module], env, secrets, 120)
+                validate_asset_pack_manifest(pack_manifest, project_module, package)
+        report = {"status": "packaging-verified", "file": output.name, "bytes": output.stat().st_size, "sha256": hashlib.sha256(output.read_bytes()).hexdigest(), "source_commit": env.get("GITHUB_SHA", "local-source; see source_digest"), "source_digest": project_hash, "godot": version, "package": package, "launcher": launcher, "abi": abi, "project_module": project_module, "min_sdk": 24, "target_sdk": 36, "test_signed": not release, "emulator_tested": False, "physical_device_tested": False, "complete_game": False}
         output.with_suffix(output.suffix + ".json").write_text(json.dumps(report, indent=2) + "\n")
         print(json.dumps(report, indent=2))
         return report

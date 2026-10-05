@@ -41,6 +41,12 @@ def main(argv=None) -> int:
     scan.add_argument('--budget', type=float, default=1800, help='Decoder/finalizer execution budget in seconds')
     scan.add_argument('--max-bundles', type=int)
     scan.add_argument('--progress-report', type=Path, help='Metadata-only progress report; never contains raw payloads')
+    scan.add_argument('--continue-until-complete', action='store_true', help='Continue timeout/budget pauses within the same job')
+    scan.add_argument('--pass-budget', type=float, help='Per-pass scheduling slice; requires --continue-until-complete')
+    scan.add_argument('--max-passes', type=int, help='Maximum same-job passes, default 8')
+    scan.add_argument('--max-bundle-timeout', type=float, help='Capped worker backoff, default 480 seconds')
+    scan.add_argument('--stall-limit', type=int, help='Stop after this many unchanged follow-up passes, default 2')
+    scan.add_argument('--continuation-report', type=Path, help='New metadata-only pass history outside checkpoints')
     verify=commands.add_parser('verify-catalog');verify.add_argument('catalog',type=Path)
     bind=commands.add_parser('bind',help='Validate explicit analyst bindings against hashed catalog evidence')
     bind.add_argument('--catalog',type=Path,required=True);bind.add_argument('--requirements',type=Path,required=True)
@@ -55,15 +61,33 @@ def main(argv=None) -> int:
         elif args.command=='requirements':
             report=make_requirements(args.definitions,track=args.track,character=args.character,kart=args.kart);write_new(args.output,report)
         elif args.command=='inventory':
+            continuation_options = (args.pass_budget, args.max_passes, args.max_bundle_timeout,
+                                    args.stall_limit, args.continuation_report)
+            if any(v is not None for v in continuation_options) and not args.continue_until_complete:
+                raise ContentError('Continuation controls require --continue-until-complete')
+            if args.continue_until_complete and not args.checkpoints:
+                raise ContentError('Continuation controls require --checkpoints')
+            if args.continue_until_complete and args.max_bundles is not None:
+                raise ContentError('--max-bundles is a single-pass control, incompatible with continuation')
             if args.checkpoints:
                 # Running as a direct script still needs the repository root for
                 # the module worker's imports, independent of the caller's cwd.
                 root = str(Path(__file__).resolve().parents[1])
                 if root not in sys.path: sys.path.insert(0, root)
                 from tools.content_batches import inventory_batched
-                report=inventory_batched(args.source,args.output,args.checkpoints,
-                    resume=args.resume,bundle_timeout=args.bundle_timeout,budget=args.budget,
-                    max_bundles=args.max_bundles,report_path=args.progress_report)
+                if args.continue_until_complete:
+                    from tools.content_continuation import inventory_continued
+                    report=inventory_continued(args.source,args.output,args.checkpoints,
+                        resume=args.resume,bundle_timeout=args.bundle_timeout,budget=args.budget,
+                        pass_budget=args.pass_budget if args.pass_budget is not None else 900,
+                        max_passes=args.max_passes if args.max_passes is not None else 8,
+                        max_bundle_timeout=args.max_bundle_timeout if args.max_bundle_timeout is not None else 480,
+                        stall_limit=args.stall_limit if args.stall_limit is not None else 2,
+                        report_path=args.progress_report,continuation_report=args.continuation_report)
+                else:
+                    report=inventory_batched(args.source,args.output,args.checkpoints,
+                        resume=args.resume,bundle_timeout=args.bundle_timeout,budget=args.budget,
+                        max_bundles=args.max_bundles,report_path=args.progress_report)
             elif (args.resume or args.max_bundles is not None or args.progress_report
                   or args.bundle_timeout != 120 or args.budget != 1800):
                 raise ContentError('Inventory controls require --checkpoints')

@@ -1,0 +1,65 @@
+{
+  "schema": 1,
+  "scope": "Historical source-run observation, not a new extraction",
+  "source_commit": "eea54a499d53cb391bb81732ff755c8a5c32a0d8",
+  "workflow_run": 37308162343,
+  "artifact_id": 11346556761,
+  "artifact_sha256": "6983312cc66ab35bf516e77e25b74239b733801dcbbf3c23503980a45e715233",
+  "progress": {
+    "attempted_bundles": 193,
+    "completed_bundles": 192,
+    "failures": [
+      {
+        "bundle": "StreamingAssets/aa/StandaloneOSX/map_battleemperorzing_scenes_all_d04721020a6a9c48530688e3281621c0.bundle",
+        "cursor": {
+          "object_id": "57ab9471a12586f0abde4161321ebf6d33205cb8ce49604a08afa98da23e5182",
+          "object_type": "Transform",
+          "objects_done": 901,
+          "phase": "typetree"
+        },
+        "reason": "timeout"
+      }
+    ],
+    "godot_imported": false,
+    "original_media_complete": false,
+    "pending_bundles": [
+      "StreamingAssets/aa/StandaloneOSX/map_battleemperorzing_scenes_all_d04721020a6a9c48530688e3281621c0.bundle",
+      "StreamingAssets/aa/StandaloneOSX/map_battlelonestargayrodeo_scenes_all_bcfdbfa7889c5d4e2bf2681bbf80817d.bundle",
+      "StreamingAssets/aa/StandaloneOSX/map_battleplanetshlorp_scenes_all_cdcfd52643d880bbd2ecd2cadf5bf6e1.bundle",
+      "StreamingAssets/aa/StandaloneOSX/map_minimaltest_scenes_all_5ceb27b7c77520b6e69f51ec8c4ec03a.bundle",
+      "StreamingAssets/aa/StandaloneOSX/map_racealharrington_scenes_all_a87b1b48fafabb97a7cb12e1c803f002.bundle",
+      "StreamingAssets/aa/StandaloneOSX/map_racearlenspeedway_scenes_all_7cfdb5f302abade7e885ccace4016492.bundle",
+      "StreamingAssets/aa/StandaloneOSX/map_racearlensuburbs_scenes_all_7ba0b5ef1dc592e580bb3d694fee3bf4.bundle",
+      "StreamingAssets/aa/StandaloneOSX/map_racelangleyfalls_scenes_all_ad66b2f5f3a4146f9c0aa369516f4b4f.bundle",
+      "StreamingAssets/aa/StandaloneOSX/map_racequahogtour_scenes_all_66bb0bc391c23c5a53b3cfbc7f36d258.bundle",
+      "StreamingAssets/aa/StandaloneOSX/map_racesharksnest_scenes_all_ea6a4be0a6b556ecbb32836303f8d95d.bundle",
+      "StreamingAssets/aa/StandaloneOSX/map_racesmithsdreamworld_scenes_all_55c2ac0e72c14e09480332ee0d5ca96b.bundle",
+      "StreamingAssets/aa/StandaloneOSX/map_racespacev2_scenes_all_cb6087989db96dbc02c571808e7ac727.bundle",
+      "StreamingAssets/aa/StandaloneOSX/map_racestewiestimemachine_scenes_all_d634c7ffc030e93e206228d4f40ddfe8.bundle",
+      "StreamingAssets/aa/StandaloneOSX/map_raceterrykorvohouse_scenes_all_263ef5ca2c32f33a0f2b4c5b03ecac85.bundle",
+      "StreamingAssets/aa/StandaloneOSX/map_racethewall_scenes_all_39053940415d04ca241d79f8a35cbc6c.bundle",
+      "StreamingAssets/aa/StandaloneOSX/maps_common_assets_all_88dd25599f1437ebbe56b58282d95017.bundle",
+      "StreamingAssets/aa/StandaloneOSX/ui_assets_all_ea382f83e1c54a0b85e91a591de0e16e.bundle",
+      "StreamingAssets/aa/StandaloneOSX/usables_assets_all_b27055ddf3f13afeaa050ba8546f26a3.bundle",
+      "StreamingAssets/aa/StandaloneOSX/vfx_assets_all_162f2a698902b6f864b11f562170d025.bundle",
+      "StreamingAssets/aa/StandaloneOSX/videos_assets_assets_structuredassets_videos_splashvideos_h264_16x10_16x10_landscape_1440.mp4_87ce8393161c76e2f17eb2138ff520e3.bundle",
+      "StreamingAssets/aa/StandaloneOSX/videos_assets_assets_structuredassets_videos_splashvideos_h264_16x10_16x10_landscape_2880.mp4_0b91ea4377ee3963872754e1d33adaf0.bundle",
+      "StreamingAssets/aa/StandaloneOSX/videos_assets_assets_structuredassets_videos_splashvideos_h264_16x9_16x9_landscape_1920.mp4_113a6787e5cdbb26d906cef0e8a90f41.bundle",
+      "StreamingAssets/aa/StandaloneOSX/videos_assets_assets_structuredassets_videos_splashvideos_h264_16x9_16x9_landscape_2560.mp4_b487fa0d180686b6f8fbd07d57678e6a.bundle",
+      "StreamingAssets/aa/StandaloneOSX/videos_assets_assets_structuredassets_videos_splashvideos_h264_16x9_16x9_landscape_4096.mp4_89866a44ec8ab7ff17b533f295c6ebc0.bundle",
+      "StreamingAssets/aa/StandaloneOSX/videos_assets_assets_structuredassets_videos_splashvideos_h264_16x9_16x9_landscape_5120.mp4_0ca9017f52a03950d1a4e070bced3c00.bundle",
+      "StreamingAssets/aa/StandaloneOSX/videos_assets_assets_structuredassets_videos_splashvideos_h264_19.5x9_19.5x9_landscape.mp4_eabadfbd93c206be984164ad968a76e8.bundle",
+      "StreamingAssets/aa/StandaloneOSX/videos_assets_assets_structuredassets_videos_splashvideos_h264_4.3x3_4.3x3_landscape.mp4_573a9ee65fb4793e8bd490c0275d190e.bundle",
+      "StreamingAssets/aa/StandaloneOSX/videos_assets_assets_structuredassets_videos_splashvideos_h264_4x3_4x3_landscape.mp4_74358544e13b07baf2e4e8d0ede89381.bundle",
+      "StreamingAssets/aa/StandaloneOSX/videos_assets_assets_structuredassets_videos_splashvideos_reencoded_4x3_landscape_2048.mp4_343681069c2c8ccdd7c1e4a842dd211e.bundle",
+      "StreamingAssets/aa/StandaloneOSX/wheels_assets_all_7448b7949fc127db7d08d1e45ba35845.bundle"
+    ],
+    "phase": "paused",
+    "reused_bundles": 0,
+    "schema": 1,
+    "source_status": "hash-verified-inputs-not-complete-media",
+    "status": "incomplete",
+    "total_bundles": 222
+  },
+  "production_continuation_completed": false
+}
