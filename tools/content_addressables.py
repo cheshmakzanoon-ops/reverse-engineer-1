@@ -29,6 +29,7 @@ MAX_BYTES = 32 * 1024 * 1024
 MAX_ITEMS = 1_000_000
 MAX_EDGES = 2_000_000
 RUNTIME_PATH = '{UnityEngine.AddressableAssets.Addressables.RuntimePath}/'
+SCENE_TYPE = 'UnityEngine.ResourceManagement.ResourceProviders.SceneInstance'
 
 
 def strict_json(payload: bytes | str) -> Any:
@@ -320,7 +321,7 @@ def bundle_relative_path(internal_id: str) -> str:
 def resolve_locations(catalog: CompactCatalog, plan: dict, *, data_root: Path | None = None) -> dict:
     """Resolve requirements to locations, never promote them to object bindings.
 
-    SceneName is matched against an exact catalog key, or a unique SceneProvider
+    SceneName is matched against an exact catalog key, or a unique SceneInstance
     internal scene basename. That is scene-load identity, not fuzzy art matching.
     Sprite subobjects and FMOD events explicitly remain separate recovery gates.
     """
@@ -342,6 +343,25 @@ def resolve_locations(catalog: CompactCatalog, plan: dict, *, data_root: Path | 
             if not isinstance(guid, str) or re.fullmatch('[0-9a-fA-F]{32}', guid) is None:
                 raise ContentError('Invalid requirement GUID')
             matches, match_kind = catalog.lookup(guid), 'exact-string-guid'
+            if len(matches) > 1:
+                # A GUID bucket can expose both Texture2D and Sprite locations.
+                # Use the original assembly-qualified requested type, not the
+                # first bucket entry or a display-name/filename heuristic.
+                candidates = [catalog.locations[n] for n in matches]
+                result['candidate_locations'] = candidates
+                qualified = req.get('subobject_type', '')
+                parts = qualified.split(',', 1) if isinstance(qualified, str) else []
+                # Atlas subobject types describe contained sprites, not the
+                # parent atlas location. Such ambiguity needs a separate policy.
+                has_atlas = any(c['resource_type']['m_ClassName'] == 'UnityEngine.U2D.SpriteAtlas'
+                                for c in candidates)
+                if (len(parts) == 2 and not has_atlas and
+                        not req.get('field', '').endswith('/_atlasSpriteRef')):
+                    requested = {'m_ClassName': parts[0].strip(), 'm_AssemblyName': parts[1].strip()}
+                    typed = [c['entry'] for c in candidates if c['resource_type'] == requested]
+                    result['requested_location_type'] = requested
+                    if len(typed) == 1:
+                        matches, match_kind = typed, 'exact-string-guid-and-qualified-type'
         elif req.get('kind') == 'scene':
             scene = req.get('scene')
             if not isinstance(scene, str) or not scene or any(c in scene for c in '/\\'):
@@ -349,9 +369,9 @@ def resolve_locations(catalog: CompactCatalog, plan: dict, *, data_root: Path | 
             matches, match_kind = catalog.lookup(scene), 'exact-scene-key'
             if not matches:
                 matches = [loc['entry'] for loc in catalog.locations
-                           if loc['provider'].endswith('.SceneProvider')
+                           if loc['resource_type']['m_ClassName'] == SCENE_TYPE
                            and PurePosixPath(loc['internal_id']).name == scene + '.unity']
-                match_kind = 'exact-scene-provider-basename'
+                match_kind = 'exact-scene-instance-basename'
         else:
             raise ContentError('Unsupported requirement kind')
         if len(matches) != 1:
@@ -367,8 +387,12 @@ def resolve_locations(catalog: CompactCatalog, plan: dict, *, data_root: Path | 
         result.update(location=location, match_kind=match_kind,
                       dependency_entries=dependency_entries, bundles=[])
         blocked = []
-        if req['kind'] == 'scene' and not location['provider'].endswith('.SceneProvider'):
-            blocked.append('scene-key-does-not-select-scene-provider')
+        if req['kind'] == 'scene':
+            # The verified original uses BundledAssetProvider even for its
+            # SceneInstance entries. Location identity is not provider execution.
+            if location['resource_type']['m_ClassName'] != SCENE_TYPE:
+                blocked.append('scene-key-does-not-select-scene-instance')
+            result['scene_runtime_provider_status'] = 'not-executed-or-ported'
         if not bundle_entries:
             blocked.append('no-bundle-dependency')
         for loc in bundle_entries:

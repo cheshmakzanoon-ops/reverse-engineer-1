@@ -51,7 +51,7 @@ def make_catalog(keys=None, buckets=None, records=None, internal=None, extra=b''
             'm_InternalIdPrefixes': [],
             'm_resourceTypes': [{'m_AssemblyName': 'UnityEngine.CoreModule', 'm_ClassName': 'UnityEngine.GameObject'},
                                 {'m_AssemblyName': 'Unity.ResourceManager', 'm_ClassName': 'IAssetBundleResource'},
-                                {'m_AssemblyName': 'Unity.ResourceManager', 'm_ClassName': 'SceneInstance'}],
+                                {'m_AssemblyName': 'Unity.ResourceManager', 'm_ClassName': 'UnityEngine.ResourceManagement.ResourceProviders.SceneInstance'}],
             **{name: base64.b64encode(value).decode('ascii') for name, value in (
                 ('m_KeyDataString', kd), ('m_BucketDataString', bd),
                 ('m_EntryDataString', ed), ('m_ExtraDataString', extra))}}
@@ -261,17 +261,52 @@ class ResolutionTests(unittest.TestCase):
         kd = base64.b64decode(source['m_KeyDataString']).replace(b'SC_Test', b'aliasxx')
         source['m_KeyDataString'] = base64.b64encode(kd).decode()
         result = resolve_locations(CompactCatalog(canonical(source)), plan())
-        self.assertEqual(result['requirements'][1]['match_kind'], 'exact-scene-provider-basename')
+        self.assertEqual(result['requirements'][1]['match_kind'], 'exact-scene-instance-basename')
         self.assertEqual(result['resolved_locations'], 2)
 
     def test_scene_alias_pointing_to_asset_is_blocked(self):
         result = resolve_locations(self.cat, plan({'key':'s', 'kind':'scene', 'scene':'driver'}))
-        self.assertIn('scene-key-does-not-select-scene-provider', result['requirements'][0]['blockers'])
+        self.assertIn('scene-key-does-not-select-scene-instance', result['requirements'][0]['blockers'])
 
     def test_ambiguous_guid_not_first_match(self):
         self.cat.buckets[Key('string', GUID)] = [0, 2]
         result = resolve_locations(self.cat, plan())
         self.assertEqual(result['requirements'][0]['reason'], 'ambiguous-locations')
+
+    def test_original_style_scene_instance_under_bundled_provider(self):
+        self.cat.locations[2]['provider'] = PROVIDERS[0]
+        result = resolve_locations(self.cat, plan())['requirements'][1]
+        self.assertEqual(result['status'], 'location-resolved-not-object-bound')
+        self.assertEqual(result['scene_runtime_provider_status'], 'not-executed-or-ported')
+
+    def test_guid_disambiguation_uses_qualified_type_not_order(self):
+        self.cat.buckets[Key('string', GUID)] = [0, 2]
+        self.cat.locations[0]['resource_type'] = {'m_ClassName':'UnityEngine.Texture2D','m_AssemblyName':'UnityEngine.CoreModule'}
+        self.cat.locations[2]['resource_type'] = {'m_ClassName':'UnityEngine.Sprite','m_AssemblyName':'UnityEngine.CoreModule'}
+        req = {'key':'sprite', 'kind':'addressable', 'guid':GUID,
+               'subobject_type':'UnityEngine.Sprite, UnityEngine.CoreModule'}
+        result = resolve_locations(self.cat, plan(req))['requirements'][0]
+        self.assertEqual(result['location']['entry'], 2)
+        self.assertEqual(result['match_kind'], 'exact-string-guid-and-qualified-type')
+        self.assertEqual(len(result['candidate_locations']), 2)
+        self.assertFalse(result['object_bound'])
+        req['subobject_type'] = 'UnityEngine.Sprite, Wrong.Assembly'
+        self.assertEqual(resolve_locations(self.cat, plan(req))['requirements'][0]['reason'], 'ambiguous-locations')
+
+    def test_same_type_multiple_locations_remain_ambiguous(self):
+        self.cat.buckets[Key('string', GUID)] = [0, 2]
+        self.cat.locations[2]['resource_type'] = self.cat.locations[0]['resource_type']
+        req = {'key':'x','kind':'addressable','guid':GUID,
+               'subobject_type':'UnityEngine.GameObject, UnityEngine.CoreModule'}
+        self.assertEqual(resolve_locations(self.cat, plan(req))['requirements'][0]['reason'], 'ambiguous-locations')
+
+    def test_atlas_subobject_type_does_not_choose_parent_location(self):
+        self.cat.buckets[Key('string', GUID)] = [0, 2]
+        self.cat.locations[0]['resource_type'] = {'m_ClassName':'UnityEngine.U2D.SpriteAtlas','m_AssemblyName':'UnityEngine.CoreModule'}
+        self.cat.locations[2]['resource_type'] = {'m_ClassName':'UnityEngine.Sprite','m_AssemblyName':'UnityEngine.CoreModule'}
+        req = {'key':'x','kind':'addressable','guid':GUID,'field':'/_atlasSpriteRef',
+               'subobject_type':'UnityEngine.Sprite, UnityEngine.CoreModule'}
+        self.assertEqual(resolve_locations(self.cat, plan(req))['requirements'][0]['reason'], 'ambiguous-locations')
 
     def test_missing_guid_and_similar_name_not_substituted(self):
         result = resolve_locations(self.cat, plan({'key':'x', 'kind':'addressable', 'guid':'0'*32}))
