@@ -20,6 +20,23 @@ jobs:
           lfs: false
           persist-credentials: false
 
+      - name: Retain exact public source for reproducing this verification
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/recovery-source-snapshot"
+          git rev-parse HEAD > "$RUNNER_TEMP/recovery-source-snapshot/commit.txt"
+          # Only tracked implementation, tests, and definitions; no games/, Git
+          # credentials, private workspaces, runtime logs, or recovered media.
+          git archive --format=tar.gz --output="$RUNNER_TEMP/recovery-source-snapshot/source.tar.gz" \
+            HEAD .github docs port scripts tests tools work README.md .gitignore .gitattributes
+          (cd "$RUNNER_TEMP/recovery-source-snapshot" && sha256sum source.tar.gz > source.sha256)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: recovery-source-${{ github.sha }}
+          path: ${{ runner.temp }}/recovery-source-snapshot/
+          retention-days: 3
+          if-no-files-found: error
+
       - name: Analysis tools parse and CLI help needs no optional dependencies
         run: |
           set -euo pipefail
