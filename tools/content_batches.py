@@ -40,7 +40,7 @@ def recipe() -> dict:
     return {'schema': SCHEMA, 'unity': UNITY_VERSION, 'unitypy': UNITYPY_VERSION,
             'python': platform.python_version(), 'code': {
                 name: sha256_file(CODE / name) for name in
-                ('content_batches.py', 'content_unity.py', 'content_pipeline.py', 'content_objects.py')}}
+                ('content_batches.py', 'content_unity.py', 'content_pipeline.py', 'content_objects.py', 'content_textures.py')}}
 
 
 def write_json(path: Path, value: dict, *, durable: bool = True) -> None:

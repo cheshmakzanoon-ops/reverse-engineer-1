@@ -311,6 +311,10 @@ def make_requirements(path: Path, *, track: str = 'Map_Race_ArlenSpeedway',
 
 
 def verify_catalog(directory: Path) -> dict:
+    try:
+        from .content_textures import image_owner_evidence, verify_texture_record, OWNER_ERROR
+    except ImportError:
+        from content_textures import image_owner_evidence, verify_texture_record, OWNER_ERROR
     path=safe_child(directory,'catalog.json')
     catalog=json.loads(path.read_text())
     if catalog.get('schema')!=SCHEMA or catalog.get('status') not in ('indexed','incomplete'):
@@ -341,6 +345,7 @@ def verify_catalog(directory: Path) -> dict:
         typed=next((a for a in record.get('artifacts',[]) if a['role']=='typetree'),None)
         if typed:
             tree=decode_raw_tree(json.loads(safe_child(directory,typed['path']).read_text()))
+            verify_texture_record(record, tree)
             if record.get('numeric_specials', []) != numeric_specials(tree):
                 raise ContentError('Catalog numeric diagnostics disagree with preserved typetree')
             actual,missing=index.references(record['id'],tree)
@@ -353,6 +358,12 @@ def verify_catalog(directory: Path) -> dict:
         for ref in record.get('references',[]):
             if ref['asset'] not in index.objects:
                 raise ContentError('Dangling catalog reference: '+ref['asset'])
+    for identity, owners in image_owner_evidence(directory, index).items():
+        record = index.objects[identity]
+        if canonical(record.get('image_owners')) != canonical(owners):
+            raise ContentError('Empty texture owner evidence disagrees with source records')
+        if not owners and OWNER_ERROR not in record['errors']:
+            raise ContentError('Catalog hides unowned serialized-empty texture')
     return catalog
 
 

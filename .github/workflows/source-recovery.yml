@@ -8,6 +8,7 @@ on:
       - '.github/workflows/source-recovery.yml'
       - 'scripts/recover_source.py'
       - 'tools/content_unity.py'
+      - 'tools/content_textures.py'
       - 'tools/content_batches.py'
       - 'tools/content_objects.py'
       - 'tools/content_checkpoints.py'
@@ -17,6 +18,8 @@ on:
       - 'tests/test_content_batches.py'
       - 'tests/test_content_objects.py'
       - 'tests/test_content_numeric.py'
+      - 'tests/test_content_textures.py'
+      - 'tests/test_font_atlas_evidence.py'
       - 'tests/test_content_checkpoints.py'
   workflow_dispatch:
     inputs:
@@ -58,7 +61,7 @@ jobs:
           sudo apt-get install -y 7zip
           python -m pip install 'gdown==5.2.0' 'cryptography==46.0.4' -r tools/content-requirements.txt
       - name: Test source gates before reading production input
-        run: python -m unittest tests.test_source_recovery tests.test_content_pipeline tests.test_content_integrity tests.test_content_batches tests.test_content_objects tests.test_content_checkpoints tests.test_content_numeric -v
+        run: python -m unittest tests.test_source_recovery tests.test_content_pipeline tests.test_content_integrity tests.test_content_batches tests.test_content_objects tests.test_content_checkpoints tests.test_content_numeric tests.test_content_textures tests.test_font_atlas_evidence -v
       - name: Fetch explicitly selected encrypted checkpoints
         if: ${{ inputs.checkpoint_run_id != '' && inputs.checkpoint_artifact != '' }}
         uses: actions/download-artifact@v4

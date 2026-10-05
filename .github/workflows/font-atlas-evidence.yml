@@ -1,0 +1,59 @@
+name: font-atlas-evidence
+
+# Read-only, hash-locked source validation. Never upload original fonts/media.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/font-atlas-evidence.yml'
+      - 'scripts/check_font_atlases.py'
+      - 'scripts/recover_source.py'
+      - 'tools/content_textures.py'
+      - 'tools/content_unity.py'
+      - 'tools/content_pipeline.py'
+      - 'tools/content-requirements.txt'
+      - 'tests/test_content_textures.py'
+      - 'tests/test_font_atlas_evidence.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+concurrency:
+  group: font-atlas-evidence-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-fonts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.5'
+      - name: Install the pinned source decoder
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y 7zip
+          python -m pip install 'gdown==5.2.0' -r tools/content-requirements.txt
+      - name: Validate authored regression cases first
+        run: python -m unittest tests.test_content_textures tests.test_font_atlas_evidence -v
+      - name: Verify original empty-atlas storage and ownership
+        run: |
+          set -euo pipefail
+          umask 077
+          python scripts/check_font_atlases.py \
+            --drive-id 15gzBmVRHNf8PpJAH2Ri0ncDfjnsgdorb \
+            --report verification/font-atlas.json
+      - name: Retain metadata evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: font-atlas-evidence-${{ github.sha }}
+          path: verification/font-atlas.json
+          if-no-files-found: error
+          retention-days: 3

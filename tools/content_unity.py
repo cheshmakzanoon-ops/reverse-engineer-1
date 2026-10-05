@@ -22,6 +22,12 @@ except ImportError:
         canonical, encode_tree, decode_tree, encode_raw_tree, decode_raw_tree, numeric_specials, object_id, safe_child, verify_source, verify_catalog)
 
 
+try:
+    from .content_textures import empty_texture_storage, image_owner_evidence, EMPTY_CONVERSION, OWNER_ERROR
+except ImportError:
+    from content_textures import empty_texture_storage, image_owner_evidence, EMPTY_CONVERSION, OWNER_ERROR
+
+
 def load_unitypy():
     try:
         import UnityPy
@@ -168,6 +174,13 @@ def read_bundle(root: Path, source: dict, output: Path, *, loader: Callable | No
                 try:
                     import io
                     note('image', obj)
+                    storage = empty_texture_storage(tree) if obj.type.name == 'Texture2D' else None
+                    if storage is not None:
+                        record['image_storage'] = storage
+                        record['conversion'] = EMPTY_CONVERSION
+                        if journal is not None: journal.commit(record)
+                        objects.append(record)
+                        continue
                     image = obj.parse_as_object().image
                     if image is None or min(image.size) < 1:
                         raise ContentError('Empty decoded image')
@@ -196,6 +209,11 @@ def finish_catalog(stage: Path, sources: list[dict], files: list[dict], objects:
             refs, missing = idx.references(identity, tree)
             record['references'] = refs
             record['errors'].extend(missing)
+    for identity, owners in image_owner_evidence(stage, idx).items():
+        record = idx.objects[identity]
+        record['image_owners'] = owners
+        if not owners:
+            record['errors'].append(dict(OWNER_ERROR))
     object_errors = sum(len(o['errors']) for o in idx.objects.values())
     catalog = {'schema': SCHEMA, 'status': 'incomplete' if errors or object_errors else 'indexed',
                'source_status': 'synthetic-adapter-fixture' if synthetic else 'unity-bundle-bytes-read',
@@ -271,6 +289,8 @@ class SceneReader:
         return self.idx.resolve(self.idx.objects[key]['file'],value)
 
     def artifact(self,key: str,role: str) -> bytes:
+        if role == 'decoded-image' and 'image_storage' in self.idx.objects[key]:
+            raise ContentError('Source texture has no serialized pixels; runtime font atlas regeneration is not implemented: '+key)
         a=next((a for a in self.idx.objects[key]['artifacts'] if a['role']==role),None)
         if a is None:raise ContentError('Missing '+role+' on '+key)
         return safe_child(self.directory,a['path']).read_bytes()
