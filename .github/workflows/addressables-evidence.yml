@@ -1,0 +1,53 @@
+name: addressables-evidence
+
+# Parse only the owner-authorized, exact-hash source; never publish game bytes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/addressables-evidence.yml'
+      - 'scripts/check_addressables.py'
+      - 'tools/content_addressables.py'
+      - 'tests/test_content_addressables.py'
+      - 'tests/test_addressables_evidence.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: addressables-evidence-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  original-catalog:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.5'
+      - name: Install source downloader and extractor
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y 7zip
+          python -m pip install 'gdown==5.2.0'
+      - name: Validate authored regressions before production input
+        run: python -m unittest tests.test_content_addressables tests.test_addressables_evidence -v
+      - name: Verify original catalog locations and selected source bundles
+        run: |
+          set -euo pipefail
+          umask 077
+          python scripts/check_addressables.py \
+            --drive-id 15gzBmVRHNf8PpJAH2Ri0ncDfjnsgdorb \
+            --report verification/addressables.json
+      - name: Retain metadata evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: addressables-evidence-${{ github.sha }}
+          path: verification/addressables.json
+          if-no-files-found: error
+          retention-days: 3
