@@ -11,10 +11,10 @@ original source-code recovery, emulator, or wrapper around the macOS binary.
 | Recovered definitions | 814 ScriptableObjects represented in the committed data; generated GDScript validated by tests |
 | Track structure | 16 decoded maps, including 12 race routes; generated roads are not imported original track art |
 | Kart/input | Per-kart commands, isolated AI/player input, selected profiles, forward grid heading, HUD binding, touch cancellation and reset state have runtime regressions |
-| Test baseline | 483 Godot checks across 16 suites and 176 Python tests pass locally; import and 360-frame headless boot pass |
+| Test baseline | 483 Godot checks across 16 suites and 196 Python tests pass locally; import and 360-frame headless boot pass |
 | Full race correctness | Six karts physically complete three Arlen Speedway laps through 188 ordered gates, with and without combat. Pickup contacts, held inventory and item effects have behavioral tests; the additional one-lap session integration saves the actual result and restores it in a fresh application instance |
 | Front end / local progress | Title, setup, settings, loading, pause, restart, results, rematch and menus are connected; 70 graphical checks include actual synthetic screen touches, focus loss, two-finger pause and safe-area layout. Two-generation local saves have 32 checks |
-| Android | Template installation is now paired with export. Local attempts stop on missing SDK/templates; the repaired CI job was still queued when checked. No APK/AAB, emulator or physical-device success is claimed for this revision |
+| Android | Earlier CI run `37208484685` at `b89801a` verified an engineering ARM64 debug APK, then failed test-AAB validation; emulator was skipped. This decoder increment adds no new Android export or physical-device result |
 | Original art and audio | Not integrated; placeholder geometry and silence are not an acceptable completed vertical slice |
 
 [Session and persistence evidence](docs/status/2026-10-04-session-flow.md),
@@ -63,10 +63,26 @@ owner-held key; it does not silently assume that key is configured.
 The exact original DMG is now verified and extracted in the development runtime.
 A deliberate SIGKILL/resume test on the original Smith's Dreamworld bundle reused
 4,575 objects and completed processing of 11,564 records. Its encrypted round trip
-verified 23,224 artifact files. Three original-object decode errors remain recorded;
-this is not a completed catalog, production scene import or recovered C# project.
+verified 23,224 artifact files. That historical run recorded three raw numeric
+serialization errors; the later repair below resolves their raw preservation.
+Neither result is a production scene import or recovered original C# project.
 See [operation and key requirements](docs/OBJECT-CHECKPOINTS.md) and
 [production evidence and limits](docs/status/2026-10-04-object-resume.md).
+
+## Lossless raw numeric recovery
+
+The original Smith's Dreamworld bundle now processes all **11,564 objects with
+zero decoder errors**. The three previously blocked raw typetrees are retained,
+including five positive-infinity fields and their exact parsed binary64 tags.
+All original object bytes remain independently hashed; no values are changed to
+zero and no curve/timeline semantics are guessed. Runtime scene/mesh/GLB paths
+still reject non-finite numbers until an explicit semantic converter exists.
+
+The increment adds 20 regression tests, for **196 Python tests**; all **483 Godot
+checks** and seven byte-identical recovered-data generators also pass. This
+repairs real input preservation, not imported track/character art or audio.
+See [production evidence and remaining gates](docs/status/2026-10-04-numeric-recovery.md)
+and [raw-versus-runtime format rules](docs/CONTENT-RECOVERY.md#raw-numeric-preservation-versus-runtime-conversion).
 
 ## What recovery means
 

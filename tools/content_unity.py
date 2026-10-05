@@ -16,10 +16,10 @@ from pathlib import Path
 from typing import Any, Callable
 try:
     from .content_pipeline import (AssetIndex, ContentError, SCHEMA, UNITY_VERSION, UNITYPY_VERSION,
-        canonical, encode_tree, decode_tree, object_id, safe_child, verify_source, verify_catalog)
+        canonical, encode_tree, decode_tree, encode_raw_tree, decode_raw_tree, numeric_specials, object_id, safe_child, verify_source, verify_catalog)
 except ImportError:
     from content_pipeline import (AssetIndex, ContentError, SCHEMA, UNITY_VERSION, UNITYPY_VERSION,
-        canonical, encode_tree, decode_tree, object_id, safe_child, verify_source, verify_catalog)
+        canonical, encode_tree, decode_tree, encode_raw_tree, decode_raw_tree, numeric_specials, object_id, safe_child, verify_source, verify_catalog)
 
 
 def load_unitypy():
@@ -147,7 +147,10 @@ def read_bundle(root: Path, source: dict, output: Path, *, loader: Callable | No
                 note('typetree', obj)
                 tree = _parse(obj)
                 record['name'] = tree.get('m_Name', '') if isinstance(tree.get('m_Name', ''), str) else ''
-                record['artifacts'].append(_artifact(output, f'objects/{identity}.json', canonical(encode_tree(tree)), 'typetree'))
+                record['artifacts'].append(_artifact(output, f'objects/{identity}.json', canonical(encode_raw_tree(tree)), 'typetree'))
+                specials = numeric_specials(tree)
+                if specials:
+                    record['numeric_specials'] = specials
             except Exception as error:
                 record['errors'].append({'field': '', 'reason': 'decode: '+type(error).__name__+': '+str(error)})
                 if journal is not None: journal.commit(record)
@@ -189,7 +192,7 @@ def finish_catalog(stage: Path, sources: list[dict], files: list[dict], objects:
     for identity, record in sorted(idx.objects.items()):
         typed = next((a for a in record['artifacts'] if a['role'] == 'typetree'), None)
         if typed:
-            tree = decode_tree(json.loads(safe_child(stage, typed['path']).read_text()))
+            tree = decode_raw_tree(json.loads(safe_child(stage, typed['path']).read_text()))
             refs, missing = idx.references(identity, tree)
             record['references'] = refs
             record['errors'].extend(missing)

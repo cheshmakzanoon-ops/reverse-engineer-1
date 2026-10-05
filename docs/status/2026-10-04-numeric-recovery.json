@@ -1,0 +1,177 @@
+{
+  "bounded_full_source_attempt": {
+    "bundle_errors": [],
+    "catalog_finalized": false,
+    "complete_receipt_manifest_sha256": "f873197d6dddd3a730d3be8af356bc0a00d341e0f3bb48e27a9ec896ded805d7",
+    "decoded_image_records": 800,
+    "decoded_mesh_records": 2738,
+    "decoder_errors": [
+      {
+        "bundle": "StreamingAssets/aa/StandaloneOSX/fonts_assets_all_e143ad6dd070c6b463520b5c462072e5.bundle",
+        "field": "",
+        "path_id": "-6978924017382949987",
+        "reason": "image: [Errno 21] Is a directory: '<extracted-data>/StreamingAssets/aa/StandaloneOSX'",
+        "type": "Texture2D"
+      },
+      {
+        "bundle": "StreamingAssets/aa/StandaloneOSX/fonts_assets_all_e143ad6dd070c6b463520b5c462072e5.bundle",
+        "field": "",
+        "path_id": "-5184046834964197735",
+        "reason": "image: [Errno 21] Is a directory: '<extracted-data>/StreamingAssets/aa/StandaloneOSX'",
+        "type": "Texture2D"
+      },
+      {
+        "bundle": "StreamingAssets/aa/StandaloneOSX/fonts_assets_all_e143ad6dd070c6b463520b5c462072e5.bundle",
+        "field": "",
+        "path_id": "-2298874796462745152",
+        "reason": "image: [Errno 21] Is a directory: '<extracted-data>/StreamingAssets/aa/StandaloneOSX'",
+        "type": "Texture2D"
+      },
+      {
+        "bundle": "StreamingAssets/aa/StandaloneOSX/fonts_assets_all_e143ad6dd070c6b463520b5c462072e5.bundle",
+        "field": "",
+        "path_id": "1157173310028707644",
+        "reason": "image: [Errno 21] Is a directory: '<extracted-data>/StreamingAssets/aa/StandaloneOSX'",
+        "type": "Texture2D"
+      },
+      {
+        "bundle": "StreamingAssets/aa/StandaloneOSX/fonts_assets_all_e143ad6dd070c6b463520b5c462072e5.bundle",
+        "field": "",
+        "path_id": "2531129067128397211",
+        "reason": "image: [Errno 21] Is a directory: '<extracted-data>/StreamingAssets/aa/StandaloneOSX'",
+        "type": "Texture2D"
+      },
+      {
+        "bundle": "StreamingAssets/aa/StandaloneOSX/fonts_assets_all_e143ad6dd070c6b463520b5c462072e5.bundle",
+        "field": "",
+        "path_id": "8661133001235926989",
+        "reason": "image: [Errno 21] Is a directory: '<extracted-data>/StreamingAssets/aa/StandaloneOSX'",
+        "type": "Texture2D"
+      }
+    ],
+    "godot_imported": false,
+    "numeric_fields": 239456,
+    "original_media_complete": false,
+    "pending_bundle_count": 28,
+    "processed_bundles": 194,
+    "raw_numeric_records": 1530,
+    "records": 237217,
+    "source_bundles": 222,
+    "worker_failures": [
+      {
+        "bundle": "StreamingAssets/aa/StandaloneOSX/map_battleplanetshlorp_scenes_all_cdcfd52643d880bbd2ecd2cadf5bf6e1.bundle",
+        "cursor": {
+          "object_id": "40da4d32b18bdf191a4de364cddcbfff14c11294ca2eda7557ae36205f322e0d",
+          "object_type": "Texture2D",
+          "objects_done": 1996,
+          "phase": "image"
+        },
+        "reason": "timeout"
+      }
+    ]
+  },
+  "new_android_export": false,
+  "physical_device_tested": false,
+  "scope": "numeric raw preservation; not original-media completion or Godot integration",
+  "single_bundle": {
+    "affected": [
+      {
+        "conversion": "raw-only",
+        "errors": [],
+        "file": "CAB-c67847e9f27a96c74b562fb5b4888dfe",
+        "numeric_specials": [
+          {
+            "field": "/SizeModule/curve/maxCurve/m_Curve/1/outSlope",
+            "kind": "positive-infinity",
+            "parsed_binary64": "7ff0000000000000"
+          },
+          {
+            "field": "/SizeModule/curve/maxCurve/m_Curve/2/inSlope",
+            "kind": "positive-infinity",
+            "parsed_binary64": "7ff0000000000000"
+          }
+        ],
+        "path_id": "3109",
+        "raw_sha256": "6bea0d85ba88700c86563c68c76d9b5c0eee3ff1a19b02108d9c0e0a80b74120",
+        "runtime_rejected": true,
+        "type": "ParticleSystem"
+      },
+      {
+        "conversion": "raw-only",
+        "errors": [],
+        "file": "CAB-c67847e9f27a96c74b562fb5b4888dfe",
+        "numeric_specials": [
+          {
+            "field": "/SizeModule/curve/maxCurve/m_Curve/1/outSlope",
+            "kind": "positive-infinity",
+            "parsed_binary64": "7ff0000000000000"
+          },
+          {
+            "field": "/SizeModule/curve/maxCurve/m_Curve/2/inSlope",
+            "kind": "positive-infinity",
+            "parsed_binary64": "7ff0000000000000"
+          }
+        ],
+        "path_id": "3113",
+        "raw_sha256": "1647c168887d8dbc1afa17e84156a6efbae5f50b2851c08958894e969ac1397e",
+        "runtime_rejected": true,
+        "type": "ParticleSystem"
+      },
+      {
+        "conversion": "raw-only",
+        "errors": [],
+        "file": "CAB-b86a964094d1509387980b1adb8d7ba2.sharedAssets",
+        "numeric_specials": [
+          {
+            "field": "/m_Clips/1/m_PostExtrapolationTime",
+            "kind": "positive-infinity",
+            "parsed_binary64": "7ff0000000000000"
+          }
+        ],
+        "path_id": "10",
+        "raw_sha256": "7a0cd38151437d15fb9a175820c7804ebd19c9cbc29f9306b6a880ce06fa1aea",
+        "runtime_rejected": true,
+        "type": "MonoBehaviour"
+      }
+    ],
+    "artifact_count": 23227,
+    "bundle_errors": [],
+    "decoder_recipe": {
+      "code": {
+        "content_batches.py": "bdf44876f7e27418593ec680fd80570ac7c0bbf5d0aef9a1e561eb1c95065170",
+        "content_objects.py": "27541f6aef2353d973b03647c0ac965a1771cd68e9a895e580bbed6da0ee7cbc",
+        "content_pipeline.py": "899e629a84ff1ff68f4115c6fc960a6e3b726b6f3954913ed9f3e0ad22f5b3b4",
+        "content_unity.py": "95fd3cabe408ea4ccab51ab6348c66de3852757450ca14944a8002b33a376daa"
+      },
+      "python": "3.13.5",
+      "schema": 1,
+      "unity": "2021.3.56f2",
+      "unitypy": "1.25.4"
+    },
+    "elapsed_seconds": 55.908,
+    "full_catalog_verified": false,
+    "godot_imported": false,
+    "numeric_object_count": 3,
+    "object_errors": [],
+    "objects": 11564,
+    "source": {
+      "bytes": 39196611,
+      "kind": "bundle",
+      "path": "StreamingAssets/aa/StandaloneOSX/map_racesmithsdreamworld_scenes_all_55c2ac0e72c14e09480332ee0d5ca96b.bundle",
+      "sha256": "e254fe6859817590b136eddd4000adf36d2085e5a547e359f440d8bb49fb1c35"
+    },
+    "status": "numeric-recovery-verified"
+  },
+  "source_dmg": {
+    "bytes": 1190250225,
+    "sha256": "4720e9fbaabd6d39bceac362e271e24e9c08d8f549191f70bad34e6d5c28b6be"
+  },
+  "tests": {
+    "data_modules_byte_identical": 7,
+    "frontend_boot_frames": 360,
+    "godot_pass": 483,
+    "godot_suites": 16,
+    "new_python_tests": 20,
+    "python_pass": 196
+  }
+}

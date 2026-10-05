@@ -1,10 +1,12 @@
 # Source-gated content recovery
 
-This pipeline is a **tested recovery/conversion foundation**, not a recovered
-Arlen Speedway production scene. The original DMG/AssetBundles were unavailable
-in the implementation environment. The UnityPy adapter has synthetic interface
-coverage; the GLB converter has real Godot import/skin/animation coverage. Neither
-establishes successful extraction from this particular game's bundles.
+This pipeline is a **recovery/conversion foundation**, not a recovered Arlen
+Speedway production scene. The original DMG has since been received, hash-verified
+and extracted. Real Smith's Dreamworld decoding is recorded in
+[the numeric-recovery evidence](status/2026-10-04-numeric-recovery.md).
+Authored GLB fixtures establish importer behavior, not production scene fidelity.
+Full catalog/reference completion and playable original-content integration remain
+separate gates; successfully retaining raw objects does not pass either gate.
 
 Keep original media, raw object bytes, fonts, converted game art and audio local.
 Do not include them in the public repository or CI artifacts without a separate
@@ -83,6 +85,39 @@ and recomputes every pointer edge from the retained typetrees. A catalog with
 recorded failures is `incomplete` and the CLI exits nonzero. It is still retained
 for diagnostics; an incomplete catalog is not a successful full-game extraction.
 No original source methods are recovered by this tool.
+
+## Raw numeric preservation versus runtime conversion
+
+Unity typetrees can contain non-finite numeric fields. In the verified Smith's
+Dreamworld source, positive infinities occur in particle size-curve slopes and a
+timeline clip's post-extrapolation time. Their source-specific meaning is **not
+inferred by the inventory**. They are neither replaced with zero nor accepted as
+valid mesh coordinates, material parameters or animation times.
+
+`encode_raw_tree` stores each non-finite parsed Python float as an explicit
+`{"$float64":"7ff0000000000000"}`-style tag. The 16 lowercase hexadecimal digits
+are its parsed binary64 bits. This does **not** claim the original Unity field
+was binary64 or that a NaN payload survived the reader's initial conversion.
+The separately hashed original `.bin` is the source-byte authority. Canonical
+JSON still rejects bare `NaN`/`Infinity` tokens. Source dictionaries using this
+reserved key are escaped through `$literal`; they are not interpreted as tags.
+
+`decode_raw_tree` is used only at raw-inventory/reference inspection boundaries.
+The record's `numeric_specials` array gives each field path, numeric category and
+parsed bits. Catalog verification recomputes that array from the typetree and
+rejects omissions or forged diagnostics. Pointer traversal continues through the
+entire object: an infinity cannot hide an unresolved reference.
+
+`encode_tree` and `decode_tree` remain **finite-only conversion APIs**.
+`SceneReader.tree`, decoded mesh serialization and GLB conversion do not opt in
+to raw special numbers. An affected runtime component needs an explicit,
+evidence-backed semantic converter before its fields can be used in Godot.
+An error-free raw decode or an `indexed` catalog is not a converted particle
+system, playable animation, complete-media report or successful scene import.
+
+The decoder recipe hashes these modules. Checkpoints from the old finite-only
+raw serializer are incompatible and must not be relabelled or silently reused.
+Finite typetrees without reserved-key collisions retain their previous encoding.
 
 ## 3. Derive the actual Arlen requirements
 

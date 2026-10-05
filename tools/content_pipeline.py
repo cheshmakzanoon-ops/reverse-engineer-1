@@ -11,6 +11,7 @@ import json
 import math
 import os
 import re
+import struct
 from collections import Counter
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
@@ -69,42 +70,91 @@ def safe_child(root: Path, relative: str) -> Path:
 
 
 def encode_tree(value: Any) -> Any:
-    """Preserve byte arrays and int64 values without lossy float/str fallbacks."""
+    """Finite-only representation for conversion data; raw trees use an explicit API."""
+    return _encode_tree(value, preserve_special=False)
+
+
+def encode_raw_tree(value: Any) -> Any:
+    """Preserve parsed numeric sentinels without interpreting them as runtime data.
+
+    $float64 stores the exact Python binary64 bits. The original object .bin is
+    retained separately: a decoded float is not a claim about its source width
+    or the original NaN payload before the Unity reader converted it.
+    """
+    return _encode_tree(value, preserve_special=True)
+
+
+def _encode_tree(value: Any, *, preserve_special: bool) -> Any:
     if value is None or isinstance(value, (str, bool)):
         return value
     if isinstance(value, int):
         return {'$int64': str(value)} if abs(value) > 9007199254740991 else value
     if isinstance(value, float):
         if not math.isfinite(value):
-            raise ContentError('Non-finite typetree number')
+            if not preserve_special:
+                raise ContentError('Non-finite typetree number')
+            return {'$float64': struct.pack('>d', value).hex()}
         return value
     if isinstance(value, (bytes, bytearray, memoryview)):
         return {'$bytes': base64.b64encode(value).decode('ascii')}
+    def encode(child):
+        return _encode_tree(child, preserve_special=preserve_special)
     if isinstance(value, dict):
         if any(not isinstance(k, str) for k in value):
-            # Unity typetrees normally have string fields; associative containers
-            # with other keys are represented as explicit pairs, never str(key).
-            return {'$pairs': [[encode_tree(k), encode_tree(v)] for k, v in value.items()]}
-        if any(k in value for k in ('$bytes', '$int64', '$pairs', '$literal')):
-            return {'$literal': [[k, encode_tree(v)] for k, v in sorted(value.items())]}
-        return {k: encode_tree(v) for k, v in value.items()}
+            return {'$pairs': [[encode(k), encode(v)] for k, v in value.items()]}
+        if any(k in value for k in ('$bytes', '$int64', '$pairs', '$literal', '$float64')):
+            return {'$literal': [[k, encode(v)] for k, v in sorted(value.items())]}
+        return {k: encode(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
-        return [encode_tree(v) for v in value]
+        return [encode(v) for v in value]
     raise ContentError(f'Unsupported typetree value: {type(value).__name__}')
 
 
 def decode_tree(value: Any) -> Any:
+    """Conversion boundary: a raw special-float tag must not become a GPU number."""
+    return _decode_tree(value, preserve_special=False)
+
+
+def decode_raw_tree(value: Any) -> Any:
+    """Explicit raw recovery decoder, never automatic runtime interpretation."""
+    return _decode_tree(value, preserve_special=True)
+
+
+def _decode_tree(value: Any, *, preserve_special: bool) -> Any:
+    def decode(child):
+        return _decode_tree(child, preserve_special=preserve_special)
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ContentError('Non-finite bare JSON number; use a validated raw numeric tag')
     if isinstance(value, dict):
+        if set(value) == {'$float64'}:
+            bits = value['$float64']
+            if not isinstance(bits, str) or not re.fullmatch(r'[0-9a-f]{16}', bits):
+                raise ContentError('Malformed raw binary64 tag')
+            decoded = struct.unpack('>d', bytes.fromhex(bits))[0]
+            if math.isfinite(decoded):
+                raise ContentError('Raw binary64 tag must describe a non-finite value')
+            if not preserve_special:
+                raise ContentError('Non-finite raw value requires explicit semantic conversion')
+            return decoded
         if set(value) == {'$bytes'}:
             return base64.b64decode(value['$bytes'], validate=True)
         if set(value) == {'$int64'}:
             return int(value['$int64'])
         if set(value) == {'$pairs'}:
-            return {decode_tree(k): decode_tree(v) for k,v in value['$pairs']}
+            return {decode(k): decode(v) for k,v in value['$pairs']}
         if set(value) == {'$literal'}:
-            return {k: decode_tree(v) for k,v in value['$literal']}
-        return {k: decode_tree(v) for k,v in value.items()}
-    return [decode_tree(v) for v in value] if isinstance(value, list) else value
+            return {k: decode(v) for k,v in value['$literal']}
+        return {k: decode(v) for k,v in value.items()}
+    return [decode(v) for v in value] if isinstance(value, list) else value
+
+
+def numeric_specials(value: Any) -> list[dict]:
+    """Field-level evidence, not a guess that an infinity means a constant curve."""
+    return [{'field': field, 'kind': 'nan' if math.isnan(number) else
+             'negative-infinity' if number < 0 else 'positive-infinity',
+             'parsed_binary64': struct.pack('>d', number).hex()}
+            for field, number in walk(value)
+            if isinstance(number, float) and not math.isfinite(number)]
 
 
 def walk(value: Any, field: str = '') -> Iterable[tuple[str, Any]]:
@@ -290,7 +340,9 @@ def verify_catalog(directory: Path) -> dict:
             raise ContentError('Duplicate artifact role on '+record['id'])
         typed=next((a for a in record.get('artifacts',[]) if a['role']=='typetree'),None)
         if typed:
-            tree=decode_tree(json.loads(safe_child(directory,typed['path']).read_text()))
+            tree=decode_raw_tree(json.loads(safe_child(directory,typed['path']).read_text()))
+            if record.get('numeric_specials', []) != numeric_specials(tree):
+                raise ContentError('Catalog numeric diagnostics disagree with preserved typetree')
             actual,missing=index.references(record['id'],tree)
             if record.get('references',[])!=actual:
                 raise ContentError('Catalog edges disagree with preserved typetree on '+record['id'])
