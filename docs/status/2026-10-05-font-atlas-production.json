@@ -1,0 +1,83 @@
+{
+  "schema": 1,
+  "scope": "targeted original font atlas raw-storage and ownership verification; not full recovery or rendering",
+  "source_commit": "eea54a499d53cb391bb81732ff755c8a5c32a0d8",
+  "workflow_run": 37308162364,
+  "job_id": 111756771855,
+  "artifact_id": 11344353090,
+  "artifact_zip_sha256": "487d954be5d6f6a3e072cf93f8ff3158b5eb14ec001ce063eae30c0aef4a6050",
+  "report_sha256": "b9210fe45ab2e2a835ea6056c40e4a6b86d36208e3f21fef2b19a6bd97307e6e",
+  "status": "targeted-storage-verified",
+  "source_status": "hash-verified-original-bundles",
+  "sources": [
+    {
+      "bytes": 25309524,
+      "path": "StreamingAssets/aa/StandaloneOSX/fonts_assets_all_e143ad6dd070c6b463520b5c462072e5.bundle",
+      "sha256": "00147668c939824ec40abdce0e132eb6c70b31b45c13c7a2dce8e2ec83b820db"
+    },
+    {
+      "bytes": 18932,
+      "path": "StreamingAssets/aa/StandaloneOSX/f1262188c47284d550ee5cef921beff9_monoscripts_082fe319e80515f2379589a97f2b1caf.bundle",
+      "sha256": "f925dfe53b9196827f470f8e822694587a55c1f3e431f6bf37f8e5027c08c65b"
+    }
+  ],
+  "objects": 382,
+  "decoded_images": 4,
+  "decoder_errors": 0,
+  "subset_catalog_status": "incomplete",
+  "subset_reference_errors": 26,
+  "original_media_complete": false,
+  "original_source_recovered": false,
+  "godot_imported": false,
+  "font_rendering_verified": false,
+  "empty_atlases": [
+    {
+      "path_id": "-6978924017382949987",
+      "raw_sha256": "f46947c16fcbb64fca3a3a74210b4c39edd71939b0493e97af8936072118c351",
+      "owner_kinds": [
+        "tmp-dynamic-font-atlas"
+      ],
+      "runtime_image_rejected": true
+    },
+    {
+      "path_id": "-5184046834964197735",
+      "raw_sha256": "684163e5d83729c3a5b5f91a939c37c65335c290cedb4f2a0f1fa9ee42f4d272",
+      "owner_kinds": [
+        "tmp-dynamic-font-atlas"
+      ],
+      "runtime_image_rejected": true
+    },
+    {
+      "path_id": "-2298874796462745152",
+      "raw_sha256": "21fde2de4ed3a96f91247a98e9062224c8910fc366260c56e9609aa56faaf581",
+      "owner_kinds": [
+        "tmp-dynamic-font-atlas"
+      ],
+      "runtime_image_rejected": true
+    },
+    {
+      "path_id": "1157173310028707644",
+      "raw_sha256": "cee4ee01807188f1a091c4c732e747d0c4dbebf026fd5f5a2013483a431eb7cb",
+      "owner_kinds": [
+        "embedded-font-atlas"
+      ],
+      "runtime_image_rejected": true
+    },
+    {
+      "path_id": "2531129067128397211",
+      "raw_sha256": "cee4ee01807188f1a091c4c732e747d0c4dbebf026fd5f5a2013483a431eb7cb",
+      "owner_kinds": [
+        "embedded-font-atlas"
+      ],
+      "runtime_image_rejected": true
+    },
+    {
+      "path_id": "8661133001235926989",
+      "raw_sha256": "cee4ee01807188f1a091c4c732e747d0c4dbebf026fd5f5a2013483a431eb7cb",
+      "owner_kinds": [
+        "embedded-font-atlas"
+      ],
+      "runtime_image_rejected": true
+    }
+  ]
+}
