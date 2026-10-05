@@ -54,7 +54,7 @@ Strict bounds, duplicate-key checks, text validation, table-size checks, cycle
 checks and a dependency-expansion budget reject corrupt inputs. Type-object keys,
 custom JSON keys, binary catalog formats and arbitrary provider execution are
 unsupported, not silently approximated. SceneName lookup uses an exact catalog
-key or a unique SceneProvider internal scene basename; it never fuzzy-matches
+key or a unique SceneInstance internal scene basename; it never fuzzy-matches
 an art filename. Only the known local Addressables RuntimePath can identify a
 bundle path. Remote URLs and other runtime-property substitutions are rejected.
 
@@ -80,3 +80,23 @@ build's exact Addressables package version:
 
 Authored test success and production-source verification are different claims;
 read the retained source report before asserting the latter.
+
+## Original-format observations
+
+The first original-source run of this reader parsed all 7,648 keys and 8,699
+locations (44,737 dependency edges). It rejected six required locations rather
+than hiding unsupported assumptions: two multi-type GUID buckets and four
+SceneInstance entries registered with BundledAssetProvider rather than
+SceneProvider. The resolver now supports exact assembly-qualified type selection
+for ambiguous non-atlas GUIDs and validates scene location identity by its
+SceneInstance type. Provider execution remains explicitly unverified; the source
+provider identifier is retained unchanged. Atlas subobject types are not used to
+silently choose a parent atlas. See the source evidence for actual run results.
+
+## Verified production result
+
+Run **37390404124** at `6ad5edb` passed against the exact original input. All
+**16 Unity requirements** resolve to locations backed by **14 verified bundles**;
+the FMOD event remains separate and unresolved. This is location verification,
+not serialized-object binding or imported original art. See the retained
+[production evidence and remaining gates](status/2026-10-05-addressables-recovery.md).

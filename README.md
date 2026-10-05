@@ -112,6 +112,22 @@ of the historical AAB passed structural/JDK-signing checks with 188 unchanged
 payload entries; that is not a new export, bundletool or device result.
 See [the increment evidence and limitations](docs/status/2026-10-05-continuation-and-aab.md).
 
+## Verified original Addressables locations
+
+The original-source catalog check now resolves all **16 Unity requirements** for
+Arlen Speedway, Hank, the Landry Longhorner and stock wheels to source-backed
+locations across **14 verified bundles**. The original catalog contains 7,648 keys,
+8,699 locations and 44,737 dependency edges. The FMOD event remains unresolved.
+This is a verified GUID/scene-to-location step, **not serialized-object binding,
+original scene import, full source-code recovery or a completed Android game**.
+
+The increment adds 48 regression tests; the full Python run has 372 passes and
+one optional engine-test skip. All 483 Godot suite checks pass in hosted CI.
+See [commands and format](docs/ADDRESSABLES-RECOVERY.md) and
+[verified production evidence and remaining gates](docs/status/2026-10-05-addressables-recovery.md).
+These stage-specific results supersede the historical test totals above without
+promoting the original-art, complete-source or Android-device status.
+
 ## What recovery means
 
 Unity IL2CPP metadata yields class/field layouts, signatures and attributes;
