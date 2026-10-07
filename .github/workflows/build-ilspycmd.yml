@@ -1,0 +1,42 @@
+name: build-ilspycmd
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/build-ilspycmd.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: icsharpcode/ILSpy
+          ref: v11.1
+          path: ILSpy
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Publish self-contained ilspycmd
+        run: |
+          set -euo pipefail
+          dotnet publish ILSpy/ICSharpCode.Decompiler.Console/ICSharpCode.Decompiler.Console.csproj \
+            -c Release -r linux-x64 --self-contained true \
+            -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false \
+            -o "$RUNNER_TEMP/ilspycmd"
+          "$RUNNER_TEMP/ilspycmd/ilspycmd" --version
+          (cd "$RUNNER_TEMP/ilspycmd" && sha256sum * > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ilspycmd-linux-x64-${{ github.sha }}
+          path: ${{ runner.temp }}/ilspycmd/
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
