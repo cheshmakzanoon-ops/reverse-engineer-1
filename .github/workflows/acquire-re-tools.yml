@@ -1,0 +1,78 @@
+name: acquire-re-tools
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/acquire-re-tools.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acquire:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Download and verify tools
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/tools/ghidra-parts" "$RUNNER_TEMP/tools/small"
+          curl -fL --retry 5 -o "$RUNNER_TEMP/tools/ghidra.zip" \
+            https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.4_build/ghidra_12.1.4_PUBLIC_20260921.zip
+          echo 'ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db  '"$RUNNER_TEMP/tools/ghidra.zip" | sha256sum -c -
+          split -b 180M -d -a 2 "$RUNNER_TEMP/tools/ghidra.zip" "$RUNNER_TEMP/tools/ghidra-parts/part-"
+          curl -fL --retry 5 -o "$RUNNER_TEMP/tools/small/ILSpy_linux-x64_11.1.0.9782.zip" \
+            https://github.com/icsharpcode/ILSpy/releases/download/v11.1/ILSpy_linux-x64_11.1.0.9782.zip
+          echo '96f8b38cdf901b0546b258e38be3a0a65cb7cdb98e62bdd9c48088c4dce9321b  '"$RUNNER_TEMP/tools/small/ILSpy_linux-x64_11.1.0.9782.zip" | sha256sum -c -
+          curl -fL --retry 5 -o "$RUNNER_TEMP/tools/small/AssetRipper_linux_x64.tar.xz" \
+            https://github.com/AssetRipper/AssetRipper/releases/download/2.0.0/AssetRipper_linux_x64.tar.xz
+          echo '6f5d4352d36795b944243eb3ec790ec37dbca6d6756e52605bc8616e042d384e  '"$RUNNER_TEMP/tools/small/AssetRipper_linux_x64.tar.xz" | sha256sum -c -
+          curl -fL --retry 5 -o "$RUNNER_TEMP/tools/small/Il2CppDumper-net7-v6.7.46.zip" \
+            https://github.com/Perfare/Il2CppDumper/releases/download/v6.7.46/Il2CppDumper-net7-v6.7.46.zip
+          (cd "$RUNNER_TEMP/tools" && sha256sum ghidra.zip ghidra-parts/* small/* > SHA256SUMS)
+          cp "$RUNNER_TEMP/tools/SHA256SUMS" "$RUNNER_TEMP/tools/ghidra-parts/"
+          cp "$RUNNER_TEMP/tools/SHA256SUMS" "$RUNNER_TEMP/tools/small/"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: re-tools-small-${{ github.sha }}
+          path: ${{ runner.temp }}/tools/small/
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ghidra-00-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/tools/ghidra-parts/part-00
+            ${{ runner.temp }}/tools/ghidra-parts/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ghidra-01-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/tools/ghidra-parts/part-01
+            ${{ runner.temp }}/tools/ghidra-parts/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ghidra-02-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/tools/ghidra-parts/part-02
+            ${{ runner.temp }}/tools/ghidra-parts/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ghidra-03-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/tools/ghidra-parts/part-03
+            ${{ runner.temp }}/tools/ghidra-parts/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
