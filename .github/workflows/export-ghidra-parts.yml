@@ -1,0 +1,57 @@
+name: export-ghidra-parts
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/export-ghidra-parts.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Download, verify and split official Ghidra
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ghidra"
+          cd "$RUNNER_TEMP/ghidra"
+          curl -fL --retry 5 --retry-all-errors -o ghidra_12.1.4_PUBLIC_20260921.zip \
+            https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.4_build/ghidra_12.1.4_PUBLIC_20260921.zip
+          echo 'ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db  ghidra_12.1.4_PUBLIC_20260921.zip' | sha256sum -c -
+          split -b 190M -d -a 2 ghidra_12.1.4_PUBLIC_20260921.zip ghidra.part-
+          test "$(find . -name 'ghidra.part-*' | wc -l)" -eq 3
+          sha256sum ghidra.part-* > PART_SHA256SUMS
+      - name: Upload Ghidra part 00
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ghidra-12.1.4-part-00
+          path: |
+            ${{ runner.temp }}/ghidra/ghidra.part-00
+            ${{ runner.temp }}/ghidra/PART_SHA256SUMS
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - name: Upload Ghidra part 01
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ghidra-12.1.4-part-01
+          path: |
+            ${{ runner.temp }}/ghidra/ghidra.part-01
+            ${{ runner.temp }}/ghidra/PART_SHA256SUMS
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - name: Upload Ghidra part 02
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ghidra-12.1.4-part-02
+          path: |
+            ${{ runner.temp }}/ghidra/ghidra.part-02
+            ${{ runner.temp }}/ghidra/PART_SHA256SUMS
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
