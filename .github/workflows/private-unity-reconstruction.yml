@@ -1,0 +1,255 @@
+name: private-unity-reconstruction
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/private-unity-reconstruction.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-unity-reconstruction-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  reconstruct:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      SOURCE_DRIVE_ID: '15gzBmVRHNf8PpJAH2Ri0ncDfjnsgdorb'
+      ASSETRIPPER_URL: 'https://github.com/AssetRipper/AssetRipper/releases/download/2.0.0/AssetRipper_linux_x64.tar.xz'
+      ASSETRIPPER_SHA256: '6f5d4352d36795b944243eb3ec790ec37dbca6d6756e52605bc8616e042d384e'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.5'
+      - name: Install bounded recovery dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y 7zip zstd curl
+          python -m pip install 'gdown==5.2.0' 'cryptography==46.0.4'
+      - name: Download and verify authorized source
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/source"
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from scripts.recover_source import download_original
+          result = download_original(os.environ['SOURCE_DRIVE_ID'], Path(os.environ['RUNNER_TEMP']) / 'source')
+          (Path(os.environ['RUNNER_TEMP']) / 'source-path.txt').write_text(str(result))
+          print(result)
+          PY
+      - name: Extract application read-only input
+        run: |
+          set -euo pipefail
+          dmg="$(cat "$RUNNER_TEMP/source-path.txt")"
+          mkdir -p "$RUNNER_TEMP/extracted"
+          7zz x "$dmg" -o"$RUNNER_TEMP/extracted" -y > "$RUNNER_TEMP/extraction.log"
+          app="$(find "$RUNNER_TEMP/extracted" -type d -name '*.app' -print -quit)"
+          test -n "$app"
+          test -f "$app/Contents/Frameworks/GameAssembly.dylib"
+          test -f "$app/Contents/Resources/Data/il2cpp_data/Metadata/global-metadata.dat"
+          printf '%s' "$app" > "$RUNNER_TEMP/app-path.txt"
+      - name: Download and verify AssetRipper
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/assetripper"
+          curl -fL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/AssetRipper.tar.xz" "$ASSETRIPPER_URL"
+          echo "$ASSETRIPPER_SHA256  $RUNNER_TEMP/AssetRipper.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/AssetRipper.tar.xz" -C "$RUNNER_TEMP/assetripper"
+          "$RUNNER_TEMP/assetripper/AssetRipper.GUI.Free" --version
+      - name: Load and export complete Unity project
+        run: |
+          set -euo pipefail
+          app="$(cat "$RUNNER_TEMP/app-path.txt")"
+          port=7880
+          cd "$RUNNER_TEMP/assetripper"
+          ./AssetRipper.GUI.Free --headless --port "$port" --log --log-path "$RUNNER_TEMP/assetripper-app.log" > "$RUNNER_TEMP/assetripper-server.log" 2>&1 &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do
+            curl -fsS "http://127.0.0.1:$port/" >/dev/null && break
+            sleep 1
+          done
+          curl -fsS -o /dev/null -X POST "http://127.0.0.1:$port/Settings/Update" \
+            --data-urlencode 'DefaultVersion=2021.3.56f2' \
+            --data-urlencode 'BundledAssetsExportMode=DirectExport' \
+            --data-urlencode 'ScriptContentLevel=Level2' \
+            --data-urlencode 'EnablePrefabOutlining=on' \
+            --data-urlencode 'RemoveNullableAttributes=on' \
+            --data-urlencode 'AudioExportFormat=Default' \
+            --data-urlencode 'ImageExportFormat=Png' \
+            --data-urlencode 'LightmapTextureExportFormat=Image' \
+            --data-urlencode 'SpriteExportMode=Native' \
+            --data-urlencode 'ShaderExportMode=Decompile' \
+            --data-urlencode 'TextExportMode=Parse' \
+            --data-urlencode 'ScriptLanguageVersion=AutoSafe' \
+            --data-urlencode 'ScriptExportMode=Hybrid' \
+            --data-urlencode 'ScriptTypesFullyQualified=on' \
+            --data-urlencode 'PreferOriginalTextureExtension=on' \
+            --data-urlencode 'ExportUnreadableAssets=on' \
+            --data-urlencode 'TargetVersion=2021.3.56f2'
+          curl --fail-with-body -sS -D "$RUNNER_TEMP/load.headers" -o "$RUNNER_TEMP/load.response" \
+            -X POST "http://127.0.0.1:$port/LoadFolder" --data-urlencode "Path=$app"
+          export_root="$RUNNER_TEMP/WKR-Reconstructed-Unity"
+          curl --fail-with-body -sS -D "$RUNNER_TEMP/export.headers" -o "$RUNNER_TEMP/export.response" \
+            -X POST "http://127.0.0.1:$port/Export/UnityProject" --data-urlencode "Path=$export_root"
+          test -d "$export_root/Assets"
+          test -d "$export_root/ProjectSettings"
+          test -d "$export_root/Packages"
+          mkdir -p "$export_root/ReconstructionEvidence"
+          cp "$RUNNER_TEMP/assetripper-app.log" "$export_root/ReconstructionEvidence/AssetRipper.log"
+          cp "$RUNNER_TEMP/assetripper-server.log" "$export_root/ReconstructionEvidence/AssetRipper-server.log"
+          cp "$RUNNER_TEMP/load.headers" "$RUNNER_TEMP/export.headers" "$export_root/ReconstructionEvidence/"
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']) / 'WKR-Reconstructed-Unity'
+          counts = {}
+          total = 0
+          for p in root.rglob('*'):
+              if p.is_file():
+                  total += p.stat().st_size
+                  counts[p.suffix.lower() or '<none>'] = counts.get(p.suffix.lower() or '<none>', 0) + 1
+          report = {
+              'source_dmg_sha256':'4720e9fbaabd6d39bceac362e271e24e9c08d8f549191f70bad34e6d5c28b6be',
+              'unity_version':'2021.3.56f2',
+              'assetripper_version':'2.0.0',
+              'file_count':sum(counts.values()),
+              'bytes':total,
+              'extensions':dict(sorted(counts.items())),
+          }
+          (root/'ReconstructionEvidence'/'export-summary.json').write_text(json.dumps(report, indent=2, sort_keys=True))
+          Path(os.environ['GITHUB_WORKSPACE'],'verification').mkdir(exist_ok=True)
+          Path(os.environ['GITHUB_WORKSPACE'],'verification','unity-export-summary.json').write_text(json.dumps(report, indent=2, sort_keys=True))
+          print(json.dumps(report, indent=2))
+          PY
+      - name: Package and recipient-encrypt Unity project
+        run: |
+          set -euo pipefail
+          umask 077
+          tarball="$RUNNER_TEMP/WKR-Reconstructed-Unity.tar.zst"
+          tar --sort=name --owner=0 --group=0 --numeric-owner -I 'zstd -T0 -3' \
+            -cf "$tarball" -C "$RUNNER_TEMP/WKR-Reconstructed-Unity" .
+          python - <<'PY'
+          import base64, hashlib, json, math, os
+          from pathlib import Path
+          from cryptography.hazmat.primitives import hashes, serialization
+          from cryptography.hazmat.primitives.asymmetric import padding, rsa
+          from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+          label=b'wkr-unity-project-v1'
+          source=Path(os.environ['RUNNER_TEMP'])/'WKR-Reconstructed-Unity.tar.zst'
+          out=Path(os.environ['RUNNER_TEMP'])/'unity-project-encrypted'
+          out.mkdir()
+          size=source.stat().st_size
+          h=hashlib.sha256()
+          with source.open('rb') as f:
+              for block in iter(lambda:f.read(8*1024*1024),b''): h.update(block)
+          digest=h.hexdigest()
+          chunk=450*1024*1024
+          parts=math.ceil(size/chunk)
+          if parts > 20:
+              raise SystemExit(f'Encrypted transfer requires {parts} parts; fixed ceiling is 20')
+          manifest={'schema':1,'kind':'wkr-unity-project-tar-zstd','sha256':digest,'bytes':size,'parts':parts,'chunk_size':chunk}
+          public=serialization.load_pem_public_key(Path('tools/source-session-public.pem').read_bytes())
+          if not isinstance(public,rsa.RSAPublicKey) or public.key_size < 3072:
+              raise SystemExit('RSA 3072+ recipient key required')
+          oaep=padding.OAEP(mgf=padding.MGF1(hashes.SHA256()),algorithm=hashes.SHA256(),label=label)
+          with source.open('rb') as stream:
+              for index in range(parts):
+                  plain=stream.read(chunk)
+                  header={**manifest,'index':index,'part_bytes':len(plain)}
+                  aad=json.dumps(header,sort_keys=True,separators=(',',':')).encode()
+                  key=AESGCM.generate_key(bit_length=256); nonce=os.urandom(12)
+                  cipher=AESGCM(key).encrypt(nonce,plain,aad)
+                  folder=out/f'part-{index:02d}'; folder.mkdir()
+                  (folder/'data.enc').write_bytes(cipher)
+                  record={'header':header,'nonce':base64.b64encode(nonce).decode(),'wrapped_key':base64.b64encode(public.encrypt(key,oaep)).decode(),'cipher_sha256':hashlib.sha256(cipher).hexdigest()}
+                  (folder/'metadata.json').write_text(json.dumps(record,sort_keys=True,separators=(',',':')))
+          (out/'manifest.json').write_text(json.dumps(manifest,indent=2,sort_keys=True))
+          Path('verification/unity-transfer-manifest.json').write_text(json.dumps(manifest,indent=2,sort_keys=True))
+          print(json.dumps(manifest,indent=2))
+          PY
+      - name: Upload transfer manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: private-unity-project-manifest-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/unity-project-encrypted/manifest.json
+            verification/unity-export-summary.json
+            verification/unity-transfer-manifest.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - name: Upload part 00
+        uses: actions/upload-artifact@v4
+        with: {name: private-unity-project-part-00-${{ github.sha }}, path: '${{ runner.temp }}/unity-project-encrypted/part-00/', if-no-files-found: ignore, retention-days: 1, compression-level: 0}
+      - name: Upload part 01
+        uses: actions/upload-artifact@v4
+        with: {name: private-unity-project-part-01-${{ github.sha }}, path: '${{ runner.temp }}/unity-project-encrypted/part-01/', if-no-files-found: ignore, retention-days: 1, compression-level: 0}
+      - name: Upload part 02
+        uses: actions/upload-artifact@v4
+        with: {name: private-unity-project-part-02-${{ github.sha }}, path: '${{ runner.temp }}/unity-project-encrypted/part-02/', if-no-files-found: ignore, retention-days: 1, compression-level: 0}
+      - name: Upload part 03
+        uses: actions/upload-artifact@v4
+        with: {name: private-unity-project-part-03-${{ github.sha }}, path: '${{ runner.temp }}/unity-project-encrypted/part-03/', if-no-files-found: ignore, retention-days: 1, compression-level: 0}
+      - name: Upload part 04
+        uses: actions/upload-artifact@v4
+        with: {name: private-unity-project-part-04-${{ github.sha }}, path: '${{ runner.temp }}/unity-project-encrypted/part-04/', if-no-files-found: ignore, retention-days: 1, compression-level: 0}
+      - name: Upload part 05
+        uses: actions/upload-artifact@v4
+        with: {name: private-unity-project-part-05-${{ github.sha }}, path: '${{ runner.temp }}/unity-project-encrypted/part-05/', if-no-files-found: ignore, retention-days: 1, compression-level: 0}
+      - name: Upload part 06
+        uses: actions/upload-artifact@v4
+        with: {name: private-unity-project-part-06-${{ github.sha }}, path: '${{ runner.temp }}/unity-project-encrypted/part-06/', if-no-files-found: ignore, retention-days: 1, compression-level: 0}
+      - name: Upload part 07
+        uses: actions/upload-artifact@v4
+        with: {name: private-unity-project-part-07-${{ github.sha }}, path: '${{ runner.temp }}/unity-project-encrypted/part-07/', if-no-files-found: ignore, retention-days: 1, compression-level: 0}
+      - name: Upload part 08
+        uses: actions/upload-artifact@v4
+        with: {name: private-unity-project-part-08-${{ github.sha }}, path: '${{ runner.temp }}/unity-project-encrypted/part-08/', if-no-files-found: ignore, retention-days: 1, compression-level: 0}
+      - name: Upload part 09
+        uses: actions/upload-artifact@v4
+        with: {name: private-unity-project-part-09-${{ github.sha }}, path: '${{ runner.temp }}/unity-project-encrypted/part-09/', if-no-files-found: ignore, retention-days: 1, compression-level: 0}
+      - name: Upload part 10
+        uses: actions/upload-artifact@v4
+        with: {name: private-unity-project-part-10-${{ github.sha }}, path: '${{ runner.temp }}/unity-project-encrypted/part-10/', if-no-files-found: ignore, retention-days: 1, compression-level: 0}
+      - name: Upload part 11
+        uses: actions/upload-artifact@v4
+        with: {name: private-unity-project-part-11-${{ github.sha }}, path: '${{ runner.temp }}/unity-project-encrypted/part-11/', if-no-files-found: ignore, retention-days: 1, compression-level: 0}
+      - name: Upload part 12
+        uses: actions/upload-artifact@v4
+        with: {name: private-unity-project-part-12-${{ github.sha }}, path: '${{ runner.temp }}/unity-project-encrypted/part-12/', if-no-files-found: ignore, retention-days: 1, compression-level: 0}
+      - name: Upload part 13
+        uses: actions/upload-artifact@v4
+        with: {name: private-unity-project-part-13-${{ github.sha }}, path: '${{ runner.temp }}/unity-project-encrypted/part-13/', if-no-files-found: ignore, retention-days: 1, compression-level: 0}
+      - name: Upload part 14
+        uses: actions/upload-artifact@v4
+        with: {name: private-unity-project-part-14-${{ github.sha }}, path: '${{ runner.temp }}/unity-project-encrypted/part-14/', if-no-files-found: ignore, retention-days: 1, compression-level: 0}
+      - name: Upload part 15
+        uses: actions/upload-artifact@v4
+        with: {name: private-unity-project-part-15-${{ github.sha }}, path: '${{ runner.temp }}/unity-project-encrypted/part-15/', if-no-files-found: ignore, retention-days: 1, compression-level: 0}
+      - name: Upload part 16
+        uses: actions/upload-artifact@v4
+        with: {name: private-unity-project-part-16-${{ github.sha }}, path: '${{ runner.temp }}/unity-project-encrypted/part-16/', if-no-files-found: ignore, retention-days: 1, compression-level: 0}
+      - name: Upload part 17
+        uses: actions/upload-artifact@v4
+        with: {name: private-unity-project-part-17-${{ github.sha }}, path: '${{ runner.temp }}/unity-project-encrypted/part-17/', if-no-files-found: ignore, retention-days: 1, compression-level: 0}
+      - name: Upload part 18
+        uses: actions/upload-artifact@v4
+        with: {name: private-unity-project-part-18-${{ github.sha }}, path: '${{ runner.temp }}/unity-project-encrypted/part-18/', if-no-files-found: ignore, retention-days: 1, compression-level: 0}
+      - name: Upload part 19
+        uses: actions/upload-artifact@v4
+        with: {name: private-unity-project-part-19-${{ github.sha }}, path: '${{ runner.temp }}/unity-project-encrypted/part-19/', if-no-files-found: ignore, retention-days: 1, compression-level: 0}
+      - name: Remove plaintext private media
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/source" "$RUNNER_TEMP/extracted" "$RUNNER_TEMP/WKR-Reconstructed-Unity" "$RUNNER_TEMP/WKR-Reconstructed-Unity.tar.zst"
