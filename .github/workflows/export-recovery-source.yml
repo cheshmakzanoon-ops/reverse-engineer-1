@@ -1,0 +1,38 @@
+name: export-recovery-source
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/export-recovery-source.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          persist-credentials: false
+      - name: Retain recovery source only
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovery-source-${{ github.sha }}
+          path: |
+            .github/
+            .gitattributes
+            .gitignore
+            README.md
+            docs/
+            port/
+            scripts/
+            tests/
+            tools/
+            work/
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 6
