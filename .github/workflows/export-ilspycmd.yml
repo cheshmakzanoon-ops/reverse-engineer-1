@@ -1,0 +1,36 @@
+name: export-ilspycmd
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/export-ilspycmd.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build official ILSpy command line decompiler
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --depth 1 --branch v11.1 https://github.com/icsharpcode/ILSpy.git "$RUNNER_TEMP/ILSpy"
+          dotnet publish "$RUNNER_TEMP/ILSpy/ICSharpCode.ILSpyCmd/ICSharpCode.ILSpyCmd.csproj" \
+            -c Release -r linux-x64 --self-contained true \
+            -p:PublishSingleFile=true -p:PublishTrimmed=false \
+            -o "$RUNNER_TEMP/ilspycmd"
+          "$RUNNER_TEMP/ilspycmd/ilspycmd" --version
+          (cd "$RUNNER_TEMP/ilspycmd" && sha256sum * > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ilspycmd-11.1-linux-x64-self-contained
+          path: ${{ runner.temp }}/ilspycmd/
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
