@@ -21,8 +21,11 @@ jobs:
         run: |
           set -euo pipefail
           git clone --filter=blob:none --depth 1 --branch v11.1 https://github.com/icsharpcode/ILSpy.git "$RUNNER_TEMP/ILSpy"
+          dotnet restore "$RUNNER_TEMP/ILSpy/ICSharpCode.ILSpyCmd/ICSharpCode.ILSpyCmd.csproj" \
+            -r linux-x64 --force-evaluate -p:RestoreLockedMode=false
           dotnet publish "$RUNNER_TEMP/ILSpy/ICSharpCode.ILSpyCmd/ICSharpCode.ILSpyCmd.csproj" \
-            -c Release -r linux-x64 --self-contained true \
+            -c Release -r linux-x64 --self-contained true --no-restore \
+            -p:RestoreLockedMode=false \
             -p:PublishSingleFile=true -p:PublishTrimmed=false \
             -o "$RUNNER_TEMP/ilspycmd"
           "$RUNNER_TEMP/ilspycmd/ilspycmd" --version
