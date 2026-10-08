@@ -1,0 +1,33 @@
+name: import-wkr-code-release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/import-wkr-code-release.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  import:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Download and verify authorized reconstruction archive
+        run: |
+          set -euo pipefail
+          url='https://github.com/azerish25-ux/grandmaster-c/releases/download/wkr-reconstruction-37656363040/WKR_Code_And_Native_Analysis.tar.zst.part-000'
+          curl --fail --location --retry 5 --retry-all-errors "$url" -o WKR_Code_And_Native_Analysis.tar.zst.part-000
+          printf '%s  %s\n' \
+            'd5805286ba7eadbe576bc183e8ca50e2428195339cba6514d155ebbd5a242bf1' \
+            'WKR_Code_And_Native_Analysis.tar.zst.part-000' | sha256sum --check --strict
+      - name: Upload verified code and native analysis
+        uses: actions/upload-artifact@v4
+        with:
+          name: wkr-code-native-analysis-verified
+          path: WKR_Code_And_Native_Analysis.tar.zst.part-000
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
