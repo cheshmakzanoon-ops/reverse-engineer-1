@@ -1,16 +1,22 @@
 name: private-source-session
 
-# Explicit source/tool changes only. Raw media is never uploaded to GitHub.
+# Read/parse only. Never execute the macOS game or publish plaintext originals.
 on:
   push:
     branches: [main]
-    paths: ['.github/workflows/private-source-session.yml', 'tools/source-session-public.pem']
+    paths:
+      - '.github/workflows/private-source-session.yml'
+      - 'tools/source-session-public.pem'
+      - 'tools/private_source.py'
+      - 'scripts/recover_source.py'
   workflow_dispatch:
+
 permissions:
   contents: read
 concurrency:
   group: private-source-session-${{ github.ref }}
   cancel-in-progress: true
+
 jobs:
   transfer:
     runs-on: ubuntu-24.04
@@ -37,26 +43,23 @@ jobs:
           cp /usr/share/doc/7zip-standalone/copyright verification/tooling/7zip-COPYRIGHT
           python -m pip wheel --wheel-dir verification/tooling/wheels -r tools/content-requirements.txt
           (cd verification/tooling && sha256sum 7zz wheels/* > SHA256SUMS)
-      - name: Verify original then encrypt to receiving session key
+      - name: Verify original then encrypt to selected reconstruction recipient
         env:
           SOURCE_DRIVE_ID: '15gzBmVRHNf8PpJAH2Ri0ncDfjnsgdorb'
-          RECIPIENT_SPKI_B64: 'MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEA389uhauOo2OE+vIwsBbIw2wEcgioyAlYKFgiYdelrXOnqVeLHvSRnEbQ1UEmcBtRcPB/PAt0lcUqv5VC24R7DAQwGQ0KAYZlVHg3cBL7y6jqdsNYYY5hRfDVx3I9aZuRHpLTbihB1GBdASAP3MBiTcOa3h3TfkQ6NX5aK5Fa/0c3CRo+m5YEAO+g+kIOQEQA//s0uYaQU3RZBwSpAtYtw5LZwn1QiL+rq5sKpLLP4O0Vq0g9ipT345yRZZmuim8iD+MR81Cz+5IUzAMql19jFR2yAybgIaH7DgefOwsB7K7aLFpGmdUwfnujHejnfNSiLhScrzDfO65TcF1rcOD2aLDo8wq42W6moU97NZufsMFnOTl+rDEIwPpLKLEu+2yAQnHPk/fe0m8zUx9GwHdoLILuP6RaMSNpUerTbEhhhWPEdUhWjUV0qO3hqfaOzFcl/EUxVXN9aF7RBLW3B/2mboxQ2BzkGhxVOw9h7+oYS6Tudy+NS3mxHvvQa5Ee8wZrZW9HIJ9rH6G+HYJMpaFQ3Y70wWWUzCNtIxtIDUis/gNb+sOT1dJKPy+b1NzvVcV17Bto+H50Gh/WptNWQbJ1GN5c3iaVPnZB2T32CsZ0a0/FX3tmp+BBuqT8bS/v80mK2gEAQtWEgLebx9FyOvRgq/dwZfCXOz/x+/rBkvCc2BsCAwEAAQ=='
         run: |
           set -euo pipefail
           python - <<'PYCODE'
-          import base64
           import os
           from pathlib import Path
-          from cryptography.hazmat.primitives import serialization
           from scripts.recover_source import download_original
           from tools.private_source import seal
           workspace=Path(os.environ['RUNNER_TEMP'])/'source-private-transfer'
           workspace.mkdir()
           source=download_original(os.environ['SOURCE_DRIVE_ID'],workspace)
-          public=serialization.load_der_public_key(base64.b64decode(os.environ['RECIPIENT_SPKI_B64'],validate=True))
-          pem=public.public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo)
-          report=seal(source,pem,Path('verification/transfer'))
+          recipient=Path('tools/source-session-public.pem').read_bytes()
+          report=seal(source,recipient,Path('verification/transfer'))
           assert report['parts']==6
+          assert report.get('scheme')=='x25519-hkdf-sha256-aesgcm-v1'
           print(report)
           PYCODE
       - uses: actions/upload-artifact@v4
